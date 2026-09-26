@@ -23,12 +23,16 @@ enum Keychain {
     }
 
     static func set(_ value: String, for key: String) throws {
-        try delete(key)
         var attributes = query(for: key)
         attributes[kSecValueData] = Data(value.utf8)
         attributes[kSecAttrAccessible] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         let status = SecItemAdd(attributes as CFDictionary, nil)
-        guard status == errSecSuccess else { throw Error(status: status) }
+        if status == errSecSuccess { return }
+        guard status == errSecDuplicateItem else { throw Error(status: status) }
+        let updateStatus = SecItemUpdate(
+            query(for: key) as CFDictionary, [kSecValueData: Data(value.utf8)] as CFDictionary
+        )
+        guard updateStatus == errSecSuccess else { throw Error(status: updateStatus) }
     }
 
     static func get(_ key: String) -> String? {

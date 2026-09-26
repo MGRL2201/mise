@@ -6,6 +6,7 @@ struct SettingsView: View {
     @State private var editingDark = false
     @State private var stockAPIKeyInput = ""
     @State private var stockAPIKeySaved = Keychain.get(Keychain.stockAPIKey) != nil
+    @State private var stockAPIKeyError: OSStatus?
 
     var body: some View {
         Form {
@@ -13,17 +14,35 @@ struct SettingsView: View {
                 SecureField("Stock price API key", text: $stockAPIKeyInput)
                 Text(stockAPIKeySaved ? "A key is stored." : "No key stored.")
                     .foregroundStyle(.secondary)
+                if let stockAPIKeyError {
+                    Text("Couldn't save key (OSStatus \(stockAPIKeyError))")
+                        .foregroundStyle(.red)
+                }
                 HStack {
                     Button("Save") {
-                        try? Keychain.set(stockAPIKeyInput, for: Keychain.stockAPIKey)
-                        stockAPIKeyInput = ""
-                        stockAPIKeySaved = true
+                        do {
+                            try Keychain.set(stockAPIKeyInput, for: Keychain.stockAPIKey)
+                            stockAPIKeyInput = ""
+                            stockAPIKeySaved = true
+                            stockAPIKeyError = nil
+                        } catch let error as Keychain.Error {
+                            stockAPIKeyError = error.status
+                        } catch {
+                            stockAPIKeyError = -1
+                        }
                     }
                     .disabled(stockAPIKeyInput.isEmpty)
                     Button("Clear", role: .destructive) {
-                        try? Keychain.delete(Keychain.stockAPIKey)
-                        stockAPIKeyInput = ""
-                        stockAPIKeySaved = false
+                        do {
+                            try Keychain.delete(Keychain.stockAPIKey)
+                            stockAPIKeyInput = ""
+                            stockAPIKeySaved = false
+                            stockAPIKeyError = nil
+                        } catch let error as Keychain.Error {
+                            stockAPIKeyError = error.status
+                        } catch {
+                            stockAPIKeyError = -1
+                        }
                     }
                     .disabled(!stockAPIKeySaved)
                 }
