@@ -87,6 +87,11 @@ struct SettingsView: View {
             }
             .listRowBackground(Color(theme.surface))
 
+            Section("On-device AI") {
+                Text(OnDeviceAI.unavailableReason ?? "Available").foregroundStyle(.secondary)
+            }
+            .listRowBackground(Color(theme.surface))
+
             Section {
                 Button("Export backup…") {
                     do {
