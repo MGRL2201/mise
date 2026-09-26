@@ -16,10 +16,13 @@ Full specification: [SPEC.md](SPEC.md).
 
 ## Build and sideload (free Apple ID)
 
-1. Open the Xcode project (created in Phase 1).
+1. Open `mise.xcodeproj`.
 2. Xcode → Settings → Accounts: add your Apple ID.
-3. Target → Signing & Capabilities: Team = "<your name> (Personal Team)";
-   change the bundle identifier to something unique to you.
+3. Create `Config/Signing.local.xcconfig` (git-ignored) with
+   `MISE_BUNDLE_PREFIX = <your.reverse.domain>` and
+   `DEVELOPMENT_TEAM = <your team id>` (or pick the team in Signing &
+   Capabilities). Bundle ids become `<prefix>.mise`; the committed default
+   prefix `com.example` is in `Config/Signing.shared.xcconfig`.
 4. Connect the iPhone, enable Developer Mode (Settings → Privacy & Security),
    select it as run destination, press Run.
 5. First launch: trust the developer profile in Settings → General →
