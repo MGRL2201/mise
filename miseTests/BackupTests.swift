@@ -1,6 +1,7 @@
 import Testing
 import SwiftData
 import Foundation
+import SwiftUI
 @testable import mise
 
 @MainActor
@@ -44,6 +45,10 @@ struct BackupTests {
         let originals = [try add("a.jpg", bytes: "aaa", to: source), try add("b.pdf", bytes: "bbb", to: source)]
         try source.context.save()
         source.defaults.set("wholeApp", forKey: "lock.mode")
+        source.defaults.set(300, forKey: "lock.grace")
+        var palette = Palette.default
+        palette.light.accent = Color.Resolved(red: 0.1, green: 0.2, blue: 0.3)
+        ThemeStore(defaults: source.defaults).palette = palette
 
         let target = try freshStore()
         try restore(try export(source), into: target)
@@ -56,6 +61,26 @@ struct BackupTests {
             #expect(copy.createdAt == original.createdAt)
             #expect(target.files.read(for: copy.id) == source.files.read(for: original.id))
         }
+        #expect(target.defaults.string(forKey: "lock.mode") == "wholeApp")
+        #expect(target.defaults.integer(forKey: "lock.grace") == 300)
+        let restoredPalette = ThemeStore(defaults: target.defaults).palette
+        #expect(restoredPalette != .default)
+        #expect(restoredPalette == ThemeStore(defaults: source.defaults).palette)
+    }
+
+    @Test func corruptSettingsThrowsAndLeavesStoreUntouched() throws {
+        let target = try freshStore()
+        let existing = try add("old.txt", bytes: "old", to: target)
+        try target.context.save()
+        target.defaults.set("wholeApp", forKey: "lock.mode")
+
+        let incoming = Backup.AttachmentRecord(id: UUID(), filename: "new.txt", createdAt: .now, data: Data("new".utf8))
+        let bad = try JSONEncoder().encode(Backup(version: 1, createdAt: .now, attachments: [incoming],
+                                                  settings: Data("garbage".utf8)))
+        #expect(throws: BackupError.corruptSettings) { try restore(bad, into: target) }
+
+        #expect(try target.context.fetch(FetchDescriptor<mise.Attachment>()).map(\.id) == [existing.id])
+        #expect(target.files.read(for: existing.id) == Data("old".utf8))
         #expect(target.defaults.string(forKey: "lock.mode") == "wholeApp")
     }
 

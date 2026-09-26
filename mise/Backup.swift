@@ -25,11 +25,14 @@ struct Backup: Codable {
 
 enum BackupError: Error, Equatable, LocalizedError {
     case unsupportedVersion(Int)
+    case corruptSettings
 
     var errorDescription: String? {
         switch self {
         case .unsupportedVersion(let version):
             "This backup uses format version \(version), which this version of mise can't read."
+        case .corruptSettings:
+            "This backup's settings are damaged, so nothing was restored."
         }
     }
 }
@@ -52,21 +55,30 @@ enum BackupService {
         let version = try JSONDecoder().decode(Header.self, from: data).version
         guard version == Backup.currentVersion else { throw BackupError.unsupportedVersion(version) }
         let backup = try JSONDecoder().decode(Backup.self, from: data)
-        let settings = try PropertyListSerialization.propertyList(from: backup.settings, format: nil) as? [String: Any] ?? [:]
+        guard let settings = try PropertyListSerialization.propertyList(from: backup.settings, format: nil) as? [String: Any]
+        else { throw BackupError.corruptSettings }
 
-        for attachment in try context.fetch(FetchDescriptor<Attachment>()) {
-            try? files.delete(for: attachment.id)
-            context.delete(attachment)
+        // Files + DB first; old files and settings only change once save succeeds.
+        let oldIDs: [UUID]
+        do {
+            for record in backup.attachments { try files.write(record.data, for: record.id) }
+            let existing = try context.fetch(FetchDescriptor<Attachment>())
+            oldIDs = existing.map(\.id)
+            existing.forEach(context.delete)
+            for record in backup.attachments {
+                let attachment = Attachment(filename: record.filename)
+                attachment.id = record.id
+                attachment.createdAt = record.createdAt
+                context.insert(attachment)
+            }
+            try context.save()
+        } catch {
+            context.rollback()
+            throw error
         }
-        for record in backup.attachments {
-            let attachment = Attachment(filename: record.filename)
-            attachment.id = record.id
-            attachment.createdAt = record.createdAt
-            context.insert(attachment)
-            try files.write(record.data, for: record.id)
-        }
+        let keep = Set(backup.attachments.map(\.id))
+        for id in oldIDs where !keep.contains(id) { try? files.delete(for: id) }
         for key in Backup.settingsKeys { defaults.set(settings[key], forKey: key) }
-        try context.save()
     }
 }
 
