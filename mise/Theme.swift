@@ -14,6 +14,26 @@ struct Palette: Codable, Equatable {
             get { modules[destination.rawValue] ?? accent }
             set { modules[destination.rawValue] = newValue }
         }
+
+        /// WCAG 2.x contrast ratio (1:1...21:1) from linear sRGB luminance.
+        static func contrastRatio(_ a: Color.Resolved, _ b: Color.Resolved) -> Double {
+            func luminance(_ c: Color.Resolved) -> Double {
+                0.2126 * Double(c.linearRed) + 0.7152 * Double(c.linearGreen) + 0.0722 * Double(c.linearBlue)
+            }
+            let (l1, l2) = (luminance(a), luminance(b))
+            let (lighter, darker) = l1 > l2 ? (l1, l2) : (l2, l1)
+            return (lighter + 0.05) / (darker + 0.05)
+        }
+
+        /// WCAG AA threshold for normal text.
+        static let minContrastRatio = 4.5
+
+        /// Text/background and text/surface pairs that fail AA contrast.
+        var contrastWarnings: [(pair: String, ratio: Double)] {
+            [("Text/Background", Self.contrastRatio(text, background)),
+             ("Text/Surface", Self.contrastRatio(text, surface))]
+                .filter { $0.ratio < Self.minContrastRatio }
+        }
     }
 
     func variant(for scheme: ColorScheme) -> Variant {
