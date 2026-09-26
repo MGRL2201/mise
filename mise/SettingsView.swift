@@ -1,4 +1,6 @@
 import SwiftUI
+import SwiftData
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @Environment(ThemeStore.self) private var store
@@ -9,6 +11,11 @@ struct SettingsView: View {
     @State private var stockAPIKeySaved = Keychain.get(Keychain.stockAPIKey) != nil
     @State private var stockAPIKeyError: OSStatus?
     @State private var lockUnavailableMessage: String?
+    @Environment(\.modelContext) private var modelContext
+    @State private var exportDocument: BackupDocument?
+    @State private var isImporting = false
+    @State private var restoreURL: URL?
+    @State private var backupError: String?
 
     var body: some View {
         @Bindable var lock = lock
@@ -74,6 +81,23 @@ struct SettingsView: View {
             }
             .listRowBackground(Color(theme.surface))
 
+            Section {
+                Button("Export backup…") {
+                    do {
+                        exportDocument = BackupDocument(data: try BackupService.export(
+                            context: modelContext, files: AttachmentFileStore(), defaults: .standard))
+                    } catch {
+                        backupError = error.localizedDescription
+                    }
+                }
+                Button("Restore from backup…") { isImporting = true }
+            } header: {
+                Text("Backup")
+            } footer: {
+                Text("API keys are not included.")
+            }
+            .listRowBackground(Color(theme.surface))
+
             Section("Theme") {
                 Picker("Variant", selection: $editingDark) {
                     Text("Light").tag(false)
@@ -111,6 +135,46 @@ struct SettingsView: View {
         }
         .navigationTitle("Settings")
         .themedBackground()
+        .fileExporter(
+            isPresented: Binding { exportDocument != nil } set: { if !$0 { exportDocument = nil } },
+            document: exportDocument, contentType: .json, defaultFilename: BackupDocument.defaultFilename
+        ) { result in
+            if case .failure(let error) = result { backupError = error.localizedDescription }
+        }
+        .fileImporter(isPresented: $isImporting, allowedContentTypes: [.json]) { result in
+            switch result {
+            case .success(let url): restoreURL = url
+            case .failure(let error): backupError = error.localizedDescription
+            }
+        }
+        .confirmationDialog(
+            "Replace all data?",
+            isPresented: Binding { restoreURL != nil } set: { if !$0 { restoreURL = nil } },
+            presenting: restoreURL
+        ) { url in
+            Button("Replace", role: .destructive) { restore(from: url) }
+        } message: { _ in
+            Text("Everything in mise is replaced with the backup's contents.")
+        }
+        .alert(
+            "Backup failed",
+            isPresented: Binding { backupError != nil } set: { if !$0 { backupError = nil } }
+        ) {} message: {
+            Text(backupError ?? "")
+        }
+    }
+
+    private func restore(from url: URL) {
+        let accessing = url.startAccessingSecurityScopedResource()
+        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+        do {
+            try BackupService.restore(
+                Data(contentsOf: url), context: modelContext, files: AttachmentFileStore(), defaults: .standard)
+            store.reload()
+            lock.reload()
+        } catch {
+            backupError = error.localizedDescription
+        }
     }
 
     private var editingVariant: Palette.Variant {

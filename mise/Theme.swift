@@ -85,9 +85,15 @@ private extension Color.Resolved {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        palette = defaults.data(forKey: Self.key)
-            .flatMap { try? JSONDecoder().decode(Palette.self, from: $0) } ?? .default
+        palette = Self.load(defaults)
     }
+
+    private static func load(_ defaults: UserDefaults) -> Palette {
+        defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(Palette.self, from: $0) } ?? .default
+    }
+
+    /// Re-read after a backup restore rewrote UserDefaults.
+    func reload() { palette = Self.load(defaults) }
 
     func reset() { palette = .default }
 }

@@ -47,6 +47,13 @@ enum LockMode: String, CaseIterable {
         isUnlocked = mode == .off  // launch starts locked
     }
 
+    /// Re-read settings after a backup restore; keeps `isUnlocked` so a
+    /// restore never locks the user out mid-session.
+    func reload() {
+        mode = defaults.string(forKey: Self.modeKey).flatMap(LockMode.init) ?? .off
+        graceSeconds = defaults.double(forKey: Self.graceKey)
+    }
+
     /// nil = never backgrounded (fresh launch), which always locks.
     static func shouldRelock(backgroundedAt: Date?, now: Date, grace: TimeInterval) -> Bool {
         guard let backgroundedAt else { return true }
