@@ -435,3 +435,51 @@ See `README.md` for the branch model (`main`, `develop`, `feature/<issue#>-<slug
 ## 12. Spike results
 
 To be filled in as capability spikes (Phase 1, Phase 9) complete.
+
+### Foundation Models (Phase 1 spike, #14)
+
+- **Date / machine:** 2026-09-27, MacBook Pro M3 Pro, macOS 26.6.2 (25G83),
+  Xcode 27.0. Harness: `miseTests/FoundationModelsSpikeTests.swift`, opt-in via
+  `TEST_RUNNER_MISE_FM_SPIKE=1` (table saved as the `fm_spike.txt` test
+  attachment). Fixed "now" = Sunday 2026-09-27 10:00 +08:00.
+- **Availability:** `SystemLanguageModel.default.availability` = `.available`
+  on the Mac and on the iPhone 17 Simulator. Unavailable devices get
+  `OnDeviceAI.unavailableReason` (shown in Settings → On-device AI), ending
+  "Manual entry still works."
+- **Mac accuracy (final prompt, 2 runs):** run A kind 8/10, all fields 8/10;
+  run B kind 9/10, all fields 9/10. First prompt (no expense/merchant hints):
+  kind 8/10, fields 6/10. Run B:
+
+| # | Input | Expected | Got | OK | ms |
+|---|---|---|---|---|---|
+| 1 | Coffee 5.50 | expense 5.5 | expense 5.5, cur=SGD, merch="Coffee Shop" | yes | 747 |
+| 2 | call mom tomorrow 6pm | task, due 09-28 18:00 | task, due 2026-09-28T18:00+08:00 | yes | 800 |
+| 3 | Uber to airport 32.40 EUR | expense 32.4 EUR | expense 32.4 EUR, merch=Uber, due=09-28 18:00 (invented) | yes | 1026 |
+| 4 | pay rent every 1st 9am !high | task | `guardrailViolation` ("May contain unsafe content") | no | 897 |
+| 5 | Ideas for the garden: … | note | note | yes | 590 |
+| 6 | Lunch with Sam at Nando's £18.20 | expense 18.2 GBP Nando's | same, cat=Food | yes | 894 |
+| 7 | Dentist appointment next Tuesday 3:30pm | task | task, due 2026-09-30 (a Wednesday) | yes | 798 |
+| 8 | Book club notes — … | note | note | yes | 847 |
+| 9 | TRADER JOE'S #123 … TOTAL 44.46 … | expense 44.46 Trader Joe's | expense 44.46, merch="TRADER JOE'S #123", cur=CNY, title "Groceries" | yes | 1268 |
+| 10 | Netflix subscription 15.49 monthly | expense 15.49 | expense 15.49 USD, merch=Netflix | yes | 748 |
+
+- **Mac latency (one fresh session per call, warm):** run A median 834 ms,
+  max 1216 ms; run B median 823 ms, max 1268 ms; first prompt median 581 ms,
+  max 985 ms.
+- **iOS Simulator (iPhone 17, iOS 27.0 runtime, host-Mac model):** availability
+  `.available`, but all 10 calls threw `LanguageModelError -1` wrapping
+  `ModelManagerError 1026` (0/10; ~170 ms to fail, 2124 ms first call).
+  Likely the iOS 27 simulator runtime vs the macOS 26.6 host model; unverified.
+- **iPhone 16 Pro Max latency: not measured — no device connected yet; re-run
+  with MISE_FM_SPIKE on device.**
+- **Failure modes:** kind flips between runs on the same input (task↔note for
+  #2 and #7); relative weekdays resolved wrong ("next Tuesday" → Wed/Fri);
+  currency and due invented (CNY/SGD from locale, due copied onto expenses);
+  literal "nil" strings in optional fields; merchant kept raw ("TRADER JOE'S
+  #123"); guardrail false positive on "pay rent … !high"; `availability` can
+  say available while calls still fail.
+- **Recommendation:** usable for quick-capture drafts. Keep the review screen
+  mandatory; treat every call as fallible (guardrail/model errors → prefill
+  the raw text into manual entry); compute dates in code (`NSDataDetector` /
+  Calendar) instead of trusting model dates; only accept a currency the text
+  actually contains, else the user's default; normalise "nil" to nil.
