@@ -83,6 +83,7 @@ struct ContentView: View {
     @State private var tab: MainTab = .today
     @State private var morePath: [Destination] = []
     @State private var macSelection: Destination? = .today
+    @Environment(AppLock.self) private var lock
 
     var body: some View {
         #if os(macOS)
@@ -115,7 +116,7 @@ struct ContentView: View {
                 NavigationStack { PlaceholderView(destination: .calendar) }
             }
             Tab("Money", systemImage: Destination.money.systemImage, value: .money) {
-                NavigationStack { PlaceholderView(destination: .money) }
+                NavigationStack { detailView(for: .money) }
             }
             Tab("More", systemImage: "ellipsis", value: .more) {
                 NavigationStack(path: $morePath) {
@@ -143,6 +144,9 @@ struct ContentView: View {
     private func detailView(for destination: Destination) -> some View {
         if destination == .settings {
             SettingsView()
+        } else if destination == .money && lock.mode == .financeAndNotes && !lock.isUnlocked {
+            // ponytail: Notes isn't gated; per-note lock (Phase 5, SPEC §6.5) will reuse AppLock.isUnlocked.
+            LockView()
         } else {
             PlaceholderView(destination: destination)
         }

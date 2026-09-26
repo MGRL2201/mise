@@ -2,14 +2,39 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(ThemeStore.self) private var store
+    @Environment(AppLock.self) private var lock
     @Environment(\.theme) private var theme
     @State private var editingDark = false
     @State private var stockAPIKeyInput = ""
     @State private var stockAPIKeySaved = Keychain.get(Keychain.stockAPIKey) != nil
     @State private var stockAPIKeyError: OSStatus?
+    @State private var lockUnavailableMessage: String?
 
     var body: some View {
+        @Bindable var lock = lock
         Form {
+            Section("Security") {
+                Picker("App lock", selection: $lock.mode) {
+                    ForEach(LockMode.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .onChange(of: lock.mode) { _, mode in
+                    guard mode != .off, !AppLock.isAvailable else {
+                        lockUnavailableMessage = nil
+                        return
+                    }
+                    lock.mode = .off
+                    lockUnavailableMessage = "Set a device passcode to enable the lock."
+                }
+                if let lockUnavailableMessage {
+                    Text(lockUnavailableMessage).foregroundStyle(.red)
+                }
+                Picker("Require unlock", selection: $lock.graceSeconds) {
+                    ForEach(AppLock.graceOptions, id: \.seconds) { Text($0.title).tag($0.seconds) }
+                }
+                .disabled(lock.mode == .off)
+            }
+            .listRowBackground(Color(theme.surface))
+
             Section("Finance") {
                 SecureField("Stock price API key", text: $stockAPIKeyInput)
                 Text(stockAPIKeySaved ? "A key is stored." : "No key stored.")
