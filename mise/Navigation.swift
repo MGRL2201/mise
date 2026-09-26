@@ -62,8 +62,11 @@ struct PlaceholderView: View {
     let destination: Destination
 
     var body: some View {
-        ContentUnavailableView(destination.title, systemImage: destination.systemImage)
-            .navigationTitle(destination.title)
+        ContentUnavailableView {
+            DestinationLabel(destination: destination)
+        }
+        .navigationTitle(destination.title)
+        .themedBackground()
     }
 }
 
@@ -85,7 +88,7 @@ struct ContentView: View {
         #if os(macOS)
         NavigationSplitView {
             List(Destination.allCases, selection: $macSelection) { destination in
-                Label(destination.title, systemImage: destination.systemImage)
+                DestinationLabel(destination: destination)
                     .tag(destination)
             }
             .navigationTitle(Self.title)
@@ -118,10 +121,11 @@ struct ContentView: View {
                 NavigationStack(path: $morePath) {
                     List(Self.moreDestinations) { destination in
                         NavigationLink(value: destination) {
-                            Label(destination.title, systemImage: destination.systemImage)
+                            DestinationLabel(destination: destination)
                         }
                     }
                     .navigationTitle("More")
+                    .themedBackground()
                     .navigationDestination(for: Destination.self) { destination in
                         detailView(for: destination)
                     }
