@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(ThemeStore.self) private var store
+    @Environment(AppLock.self) private var lock
     @Environment(\.theme) private var theme
     @State private var editingDark = false
     @State private var stockAPIKeyInput = ""
@@ -9,7 +10,19 @@ struct SettingsView: View {
     @State private var stockAPIKeyError: OSStatus?
 
     var body: some View {
+        @Bindable var lock = lock
         Form {
+            Section("Security") {
+                Picker("App lock", selection: $lock.mode) {
+                    ForEach(LockMode.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                Picker("Require unlock", selection: $lock.graceSeconds) {
+                    ForEach(AppLock.graceOptions, id: \.seconds) { Text($0.title).tag($0.seconds) }
+                }
+                .disabled(lock.mode == .off)
+            }
+            .listRowBackground(Color(theme.surface))
+
             Section("Finance") {
                 SecureField("Stock price API key", text: $stockAPIKeyInput)
                 Text(stockAPIKeySaved ? "A key is stored." : "No key stored.")
