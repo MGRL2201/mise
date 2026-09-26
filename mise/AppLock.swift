@@ -32,6 +32,13 @@ enum LockMode: String, CaseIterable {
     var backgroundedAt: Date?
     var errorMessage: String?
 
+    /// Whether the device has any owner authentication (passcode / Mac
+    /// password) set up. Without one, `.deviceOwnerAuthentication` can never
+    /// succeed, so the lock would otherwise trap the user forever.
+    static var isAvailable: Bool {
+        LAContext().canEvaluatePolicy(.deviceOwnerAuthentication, error: nil)
+    }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         let mode = defaults.string(forKey: Self.modeKey).flatMap(LockMode.init) ?? .off
@@ -61,7 +68,13 @@ enum LockMode: String, CaseIterable {
         let context = LAContext()
         var error: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
-            errorMessage = error?.localizedDescription ?? "Authentication is unavailable."
+            if error?.code == LAError.passcodeNotSet.rawValue {
+                // No device passcode means nothing can protect the lock anyway.
+                isUnlocked = true
+                errorMessage = nil
+            } else {
+                errorMessage = error?.localizedDescription ?? "Authentication is unavailable."
+            }
             return
         }
         do {
@@ -102,13 +115,20 @@ struct AppLockRoot: ViewModifier {
     @Environment(\.theme) private var theme
 
     func body(content: Content) -> some View {
+        let wholeAppLocked = lock.mode == .wholeApp && !lock.isUnlocked
+        #if os(macOS)
+        let privacyCovered = false
+        #else
+        let privacyCovered = lock.mode != .off && phase != .active
+        #endif
         content
+            .accessibilityHidden(wholeAppLocked || privacyCovered)
             .overlay {
-                if lock.mode == .wholeApp && !lock.isUnlocked { LockView() }
+                if wholeAppLocked { LockView() }
             }
             #if !os(macOS)
             .overlay {
-                if lock.mode != .off && phase != .active {
+                if privacyCovered {
                     Image(systemName: "lock.fill")
                         .font(.largeTitle)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
