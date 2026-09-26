@@ -4,9 +4,32 @@ struct SettingsView: View {
     @Environment(ThemeStore.self) private var store
     @Environment(\.theme) private var theme
     @State private var editingDark = false
+    @State private var stockAPIKeyInput = ""
+    @State private var stockAPIKeySaved = Keychain.get(Keychain.stockAPIKey) != nil
 
     var body: some View {
         Form {
+            Section("Finance") {
+                SecureField("Stock price API key", text: $stockAPIKeyInput)
+                Text(stockAPIKeySaved ? "A key is stored." : "No key stored.")
+                    .foregroundStyle(.secondary)
+                HStack {
+                    Button("Save") {
+                        try? Keychain.set(stockAPIKeyInput, for: Keychain.stockAPIKey)
+                        stockAPIKeyInput = ""
+                        stockAPIKeySaved = true
+                    }
+                    .disabled(stockAPIKeyInput.isEmpty)
+                    Button("Clear", role: .destructive) {
+                        try? Keychain.delete(Keychain.stockAPIKey)
+                        stockAPIKeyInput = ""
+                        stockAPIKeySaved = false
+                    }
+                    .disabled(!stockAPIKeySaved)
+                }
+            }
+            .listRowBackground(Color(theme.surface))
+
             Section("Theme") {
                 Picker("Variant", selection: $editingDark) {
                     Text("Light").tag(false)
