@@ -4,6 +4,7 @@ import SwiftData
 /// App-owned data lives in SwiftData. Model list is centralized here so
 /// backup/restore (#8) and the container setup share one source of truth.
 enum Storage {
+    /// Adding a model? Also add it to `BackupService` export/restore (Backup.swift).
     static let models: [any PersistentModel.Type] = [
         Attachment.self,
     ]
