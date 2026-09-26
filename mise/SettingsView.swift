@@ -4,9 +4,51 @@ struct SettingsView: View {
     @Environment(ThemeStore.self) private var store
     @Environment(\.theme) private var theme
     @State private var editingDark = false
+    @State private var stockAPIKeyInput = ""
+    @State private var stockAPIKeySaved = Keychain.get(Keychain.stockAPIKey) != nil
+    @State private var stockAPIKeyError: OSStatus?
 
     var body: some View {
         Form {
+            Section("Finance") {
+                SecureField("Stock price API key", text: $stockAPIKeyInput)
+                Text(stockAPIKeySaved ? "A key is stored." : "No key stored.")
+                    .foregroundStyle(.secondary)
+                if let stockAPIKeyError {
+                    Text("Couldn't save key (OSStatus \(stockAPIKeyError))")
+                        .foregroundStyle(.red)
+                }
+                HStack {
+                    Button("Save") {
+                        do {
+                            try Keychain.set(stockAPIKeyInput, for: Keychain.stockAPIKey)
+                            stockAPIKeyInput = ""
+                            stockAPIKeySaved = true
+                            stockAPIKeyError = nil
+                        } catch let error as Keychain.Error {
+                            stockAPIKeyError = error.status
+                        } catch {
+                            stockAPIKeyError = -1
+                        }
+                    }
+                    .disabled(stockAPIKeyInput.isEmpty)
+                    Button("Clear", role: .destructive) {
+                        do {
+                            try Keychain.delete(Keychain.stockAPIKey)
+                            stockAPIKeyInput = ""
+                            stockAPIKeySaved = false
+                            stockAPIKeyError = nil
+                        } catch let error as Keychain.Error {
+                            stockAPIKeyError = error.status
+                        } catch {
+                            stockAPIKeyError = -1
+                        }
+                    }
+                    .disabled(!stockAPIKeySaved)
+                }
+            }
+            .listRowBackground(Color(theme.surface))
+
             Section("Theme") {
                 Picker("Variant", selection: $editingDark) {
                     Text("Light").tag(false)
