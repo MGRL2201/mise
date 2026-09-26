@@ -750,3 +750,105 @@ Detect conflicts via NSFileVersion and version counter/hash mismatch; UI to pick
 - [ ] Conflict versions detected and listed
 - [ ] Keep mine / keep theirs; resolved versions cleaned up
 EOF
+
+# ============================ Phase 9 ============================
+issue "Spike: watchOS install on free account and WatchConnectivity" "module:watch,spike,priority:high" "$M9" <<'EOF'
+VERIFY a watchOS app installs from a free Personal Team build and can round-trip a WatchConnectivity message with the phone. SPEC §2.2, §2.3, §6.7.
+
+## Acceptance criteria
+- [ ] Watch app installs and launches on the watch with Personal Team signing
+- [ ] Developer Mode on the watch enabled; steps noted
+- [ ] App IDs consumed by watch app + extension counted (10/week limit)
+- [ ] `sendMessage` phone → watch → phone reply round-trip works
+- [ ] Results written to SPEC.md §12
+EOF
+
+issue "Spike: EventKit access on watchOS" "module:watch,spike" "$M9" <<'EOF'
+VERIFY whether the watch app can read reminders/events and complete a reminder directly via EventKit. Decides direct vs phone-relayed data. SPEC §2.3, §6.7.
+
+## Acceptance criteria
+- [ ] Permission prompt on watch; record granted/denied behavior
+- [ ] Read today's reminders and events on the watch
+- [ ] Complete a reminder on the watch; change shows in Reminders on iPhone
+- [ ] Decision (direct or phone-relayed) + results written to SPEC.md §12
+EOF
+
+issue "watchOS app target, navigation shell and theming" "module:watch,infra,priority:high" "$M9" <<'EOF'
+watchOS 26+ app target in the same Xcode project; navigation shell for glance, tasks, capture; palette from the phone theme. SPEC §2.1, §6.7.
+
+## Acceptance criteria
+- [ ] Watch app target builds and runs with Personal Team signing
+- [ ] Shell with Today, Tasks, Capture screens (placeholders ok)
+- [ ] Accent/module colors match the phone palette (synced or shared code)
+- [ ] Shared model code compiles for watchOS without iOS-only APIs
+EOF
+
+issue "Phone-watch sync layer: snapshot and actions" "module:watch,infra,priority:high" "$M9" <<'EOF'
+Codable snapshot (next event, today's tasks, budget left, net worth) pushed phone → watch via `applicationContext`; action channel watch → phone via `sendMessage`, queued with `transferUserInfo` when unreachable. SPEC §6.7.
+
+## Acceptance criteria
+- [ ] Phone pushes a new snapshot when tasks, events, or budget change
+- [ ] Watch persists last snapshot and shows it on launch without the phone
+- [ ] Actions queued when phone unreachable and delivered once reachable
+- [ ] Phone confirms each action; watch updates state
+- [ ] Unit test: snapshot encode/decode round-trip
+EOF
+
+issue "Watch Today glance" "module:watch,module:today,feature" "$M9" <<'EOF'
+Glance screen: next event, today's tasks, budget left, from the synced snapshot. SPEC §6.7, §6.1.
+
+## Acceptance criteria
+- [ ] Shows next event with time/countdown, today's tasks, budget left
+- [ ] Shows last-synced time; stale data marked
+- [ ] Budget hidden when Finance lock mode is on
+EOF
+
+issue "Watch task check-off synced to Reminders" "module:watch,module:tasks,feature" "$M9" <<'EOF'
+Check off today's tasks on the watch; completion reaches Apple Reminders via the phone, or directly via EventKit per spike result. SPEC §6.7, §6.2.
+
+## Acceptance criteria
+- [ ] Tap completes task on the watch with immediate UI feedback
+- [ ] Reminder marked complete in Reminders app on iPhone
+- [ ] Check-off while phone unreachable is queued and applied later
+- [ ] Failed completion reverts the watch UI state
+EOF
+
+issue "Watch voice quick capture via phone AI" "module:watch,feature" "$M9" <<'EOF'
+Dictation on the watch ("coffee 5.50", "call mom 6pm") sent to the phone; Foundation Models classifies as expense, task, or note (reuses §6.1 quick capture). SPEC §6.7.
+
+## Acceptance criteria
+- [ ] Dictation input produces text on the watch
+- [ ] Phone classifies and returns type + parsed fields
+- [ ] Watch shows result for confirmation; saves only after confirm
+- [ ] Captures queued when phone unreachable, classified once reachable
+EOF
+
+issue "Complications: next event and task count" "module:watch,module:widgets,feature" "$M9" <<'EOF'
+WidgetKit complications for next event and today's task count, in all four accessory families. Uses the synced snapshot. SPEC §6.7.
+
+## Acceptance criteria
+- [ ] Next event in `accessoryCircular`, `accessoryRectangular`, `accessoryInline`, `accessoryCorner`
+- [ ] Task count in the same four families
+- [ ] Timelines reload when a new snapshot arrives
+- [ ] Tap opens the matching watch screen
+EOF
+
+issue "Complications: budget left and net worth" "module:watch,module:widgets,module:finance,feature" "$M9" <<'EOF'
+WidgetKit complications for budget left and net worth, in all four accessory families. Respects the Finance Face ID lock setting. SPEC §6.7, §5.
+
+## Acceptance criteria
+- [ ] Budget left in `accessoryCircular`, `accessoryRectangular`, `accessoryInline`, `accessoryCorner`
+- [ ] Net worth in the same four families
+- [ ] Amounts hidden (placeholder shown) when Finance locked mode is on
+- [ ] Timelines reload when a new snapshot arrives
+EOF
+
+issue "Verify phone notifications mirror to watch" "module:watch,spike" "$M9" <<'EOF'
+Confirm the phone's local notifications mirror to the watch (system behavior). No code expected. SPEC §6.7.
+
+## Acceptance criteria
+- [ ] Reminder alarm appears on the watch when the phone is locked
+- [ ] Bill reminder notification appears on the watch
+- [ ] News digest notification appears on the watch
+- [ ] Results written to SPEC.md §12
+EOF

@@ -1,8 +1,9 @@
 # mise
 
-Personal all-in-one app for iPhone and Mac: tasks, calendar/planner, finance,
-notes, and news, with a Today screen tying them together. One multiplatform
-SwiftUI codebase, SwiftData storage, local-first, no backend, no paid services.
+Personal all-in-one app for iPhone, Mac, and Apple Watch: tasks,
+calendar/planner, finance, notes, and news, with a Today screen tying them
+together. One multiplatform SwiftUI codebase, SwiftData storage, local-first,
+no backend, no paid services.
 
 Full specification: [SPEC.md](SPEC.md).
 
@@ -10,6 +11,7 @@ Full specification: [SPEC.md](SPEC.md).
 
 - Xcode 26+, macOS 26+ on Apple silicon
 - iPhone on iOS 26+
+- Apple Watch on watchOS 26+ (optional, Phase 9)
 - A free Apple ID (Personal Team) — no paid developer account needed
 
 ## Build and sideload (free Apple ID)
@@ -26,6 +28,9 @@ Full specification: [SPEC.md](SPEC.md).
    to auto-refresh). Free accounts allow 3 sideloaded apps and 10 App IDs/week.
 
 For the Mac, select "My Mac" as the destination and Run.
+
+For the Apple Watch, enable Developer Mode on the watch, select the watch app
+scheme and the watch as destination, and Run. Same 7-day expiry.
 
 API keys (e.g. stock prices) are entered in the app at runtime and stored in
 the Keychain. Never commit keys; `*.xcconfig` files are git-ignored.

@@ -8,7 +8,9 @@ reader into one native app, with a "Today" screen that pulls the most relevant
 pieces of each module together.
 
 The app is built as a single multiplatform SwiftUI codebase targeting iPhone
-and Mac. It is local-first: there is no backend server and no paid service.
+and Mac, with an Apple Watch companion app (glance, check-off, voice capture,
+complications) added in a later phase. It is local-first: there is no backend
+server and no paid service.
 Data either lives in Apple's own system stores (Reminders and Calendar via
 EventKit) or in the app's own SwiftData store on each device, with an optional
 file-based sync between devices.
@@ -19,6 +21,8 @@ file-based sync between devices.
 
 - **iOS:** iPhone 16 Pro Max, iOS 26 or later.
 - **macOS:** macOS 26 or later, Apple silicon.
+- **watchOS:** Apple Watch paired with the iPhone, watchOS 26 or later
+  (Phase 9).
 - One multiplatform SwiftUI project with shared code; platform-specific UI
   where it matters (tab bar on iPhone, sidebar on Mac).
 - Local persistence with SwiftData.
@@ -33,6 +37,9 @@ Apple Developer Program membership. This implies:
 - At most **3 sideloaded apps** active at once on a device, and at most
   **10 App IDs per week**. Every extension (widget, share extension, intents)
   consumes an App ID, so extensions must be added deliberately.
+- The **watchOS app** (Phase 9) uses about **2 more App IDs**: the watch app
+  and its widget/complication extension. The watch needs Developer Mode
+  enabled, and the same 7-day re-sign applies to it.
 - Everything is local-first. No server, no paid APIs.
 
 ### 2.3 Capabilities available on a free account
@@ -54,6 +61,9 @@ Per Apple's capability table for free accounts:
 | LocalAuthentication (Face ID / Touch ID) | Fine |
 | Background modes | Fine |
 | MapKit | Fine |
+| WatchConnectivity | Fine (no entitlement) |
+| Foundation Models on watchOS | Not available (delegated to phone) |
+| EventKit on watchOS | **VERIFY** |
 
 App Intents / App Shortcuts are not the legacy SiriKit entitlement, but whether
 Siri invocation works on a free account must be verified on device.
@@ -315,6 +325,34 @@ and documented here.
   save-for-later with offline text; read/unread state; duplicate-story
   collapsing. Paywalled sites show the summary only.
 
+### 6.7 Apple Watch
+
+A watchOS app target in the same multiplatform Xcode project, installed via
+Xcode with the free Personal Team (see §2.2). Built in Phase 9.
+
+- **Today glance:** next event, today's tasks, budget left.
+- **Task check-off** from the wrist, synced back to Reminders via the phone,
+  or directly via EventKit if the watchOS EventKit spike passes.
+- **Voice quick capture:** dictation (e.g. "coffee 5.50", "call mom 6pm") is
+  sent to the phone, where Foundation Models classifies it as expense, task,
+  or note (as in §6.1). The watch shows the result for confirmation before
+  saving. Foundation Models is not available on watchOS.
+- **Complications** (WidgetKit accessory families: `accessoryCircular`,
+  `accessoryRectangular`, `accessoryInline`, `accessoryCorner`): next event,
+  task count, budget left, net worth. Amounts are hidden when Finance lock
+  mode is on (§5).
+- **Data flow:**
+  - The phone pushes a snapshot (next event, today's tasks, budget left, net
+    worth) via WatchConnectivity `applicationContext`.
+  - The watch sends actions (check-off, capture text) via `sendMessage`, or
+    `transferUserInfo` when the phone is unreachable (queued delivery).
+  - The phone applies the action and confirms; the next snapshot reflects it.
+  - Direct EventKit on the watch: **VERIFY** (spike). Fallback is the
+    phone-relayed data above.
+- **Notifications:** local notifications from the phone app mirror to the
+  watch automatically (system behavior) when the phone is locked. No watch
+  work needed.
+
 ## 7. Deferred / v2
 
 - Split transactions (Finance).
@@ -340,6 +378,10 @@ and documented here.
   valuation.
 - Paywalled news shows only the summary.
 - Markdown round-trip drops unsupported rich formatting.
+- Watch data is only as fresh as the last phone sync.
+- Watch quick capture needs the phone reachable for AI classification;
+  otherwise it is queued until the phone is reachable.
+- The 7-day re-sign covers the watch app too.
 
 ## 9. Items to verify (spikes)
 
@@ -351,6 +393,9 @@ and documented here.
 - iOS 26 `TextEditor` + `AttributedString` capability for live Markdown editing.
 - Foundation Models quality for quick-capture classification and receipt
   extraction.
+- watchOS app install on a free account, plus WatchConnectivity round-trip.
+- EventKit access on watchOS (read and complete reminders directly).
+- Watch complications (widget) extension on a free account.
 
 ## 10. Phased build plan
 
@@ -371,6 +416,9 @@ Each phase is a GitHub milestone; each task is a GitHub issue.
 7. **Today screen, widgets, quick capture, global search.**
 8. **Mac polish & cross-device sync** — Mac UI adaptations, sync folder, lease
    lock, conflict resolution.
+9. **watchOS** — watch app target, phone-watch sync via WatchConnectivity,
+   Today glance, task check-off, voice quick capture via phone AI,
+   complications, spikes (free-account install, EventKit on watch).
 
 ## 11. Development workflow
 
