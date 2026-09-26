@@ -760,6 +760,7 @@ VERIFY a watchOS app installs from a free Personal Team build and can round-trip
 - [ ] Developer Mode on the watch enabled; steps noted
 - [ ] App IDs consumed by watch app + extension counted (10/week limit)
 - [ ] `sendMessage` phone → watch → phone reply round-trip works
+- [ ] App Groups on watchOS: watch app writes, complication extension reads
 - [ ] Results written to SPEC.md §12
 EOF
 
@@ -791,6 +792,7 @@ Codable snapshot (next event, today's tasks, budget left, net worth) pushed phon
 - [ ] Watch persists last snapshot and shows it on launch without the phone
 - [ ] Actions queued when phone unreachable and delivered once reachable
 - [ ] Phone confirms each action; watch updates state
+- [ ] Phone omits money fields from the snapshot while Finance lock or whole-app lock is on
 - [ ] Unit test: snapshot encode/decode round-trip
 EOF
 
@@ -800,7 +802,8 @@ Glance screen: next event, today's tasks, budget left, from the synced snapshot.
 ## Acceptance criteria
 - [ ] Shows next event with time/countdown, today's tasks, budget left
 - [ ] Shows last-synced time; stale data marked
-- [ ] Budget hidden when Finance lock mode is on
+- [ ] Budget hidden when absent from snapshot (Finance lock or whole-app lock)
+- [ ] Budget uses `privacySensitive()`; redacts when wrist-locked or always-on
 EOF
 
 issue "Watch task check-off synced to Reminders" "module:watch,module:tasks,feature" "$M9" <<'EOF'
@@ -813,7 +816,7 @@ Check off today's tasks on the watch; completion reaches Apple Reminders via the
 - [ ] Failed completion reverts the watch UI state
 EOF
 
-issue "Watch voice quick capture via phone AI" "module:watch,feature" "$M9" <<'EOF'
+issue "Watch voice quick capture via phone AI" "module:watch,module:today,feature" "$M9" <<'EOF'
 Dictation on the watch ("coffee 5.50", "call mom 6pm") sent to the phone; Foundation Models classifies as expense, task, or note (reuses §6.1 quick capture). SPEC §6.7.
 
 ## Acceptance criteria
@@ -834,12 +837,13 @@ WidgetKit complications for next event and today's task count, in all four acces
 EOF
 
 issue "Complications: budget left and net worth" "module:watch,module:widgets,module:finance,feature" "$M9" <<'EOF'
-WidgetKit complications for budget left and net worth, in all four accessory families. Respects the Finance Face ID lock setting. SPEC §6.7, §5.
+WidgetKit complications for budget left and net worth, in all four accessory families. Respects Finance lock. SPEC §6.7, §5.
 
 ## Acceptance criteria
 - [ ] Budget left in `accessoryCircular`, `accessoryRectangular`, `accessoryInline`, `accessoryCorner`
 - [ ] Net worth in the same four families
-- [ ] Amounts hidden (placeholder shown) when Finance locked mode is on
+- [ ] Placeholder shown when amounts absent from snapshot (Finance lock or whole-app lock)
+- [ ] Amounts use `privacySensitive()`; redact when wrist-locked or always-on
 - [ ] Timelines reload when a new snapshot arrives
 EOF
 

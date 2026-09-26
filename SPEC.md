@@ -62,7 +62,7 @@ Per Apple's capability table for free accounts:
 | Background modes | Fine |
 | MapKit | Fine |
 | WatchConnectivity | Fine (no entitlement) |
-| Foundation Models on watchOS | Not available (delegated to phone) |
+| Foundation Models on watchOS | Not available on watchOS (any account); delegated to phone |
 | EventKit on watchOS | **VERIFY** |
 
 App Intents / App Shortcuts are not the legacy SiriKit entitlement, but whether
@@ -339,16 +339,23 @@ Xcode with the free Personal Team (see §2.2). Built in Phase 9.
   saving. Foundation Models is not available on watchOS.
 - **Complications** (WidgetKit accessory families: `accessoryCircular`,
   `accessoryRectangular`, `accessoryInline`, `accessoryCorner`): next event,
-  task count, budget left, net worth. Amounts are hidden when Finance lock
-  mode is on (§5).
+  task count, budget left, net worth.
 - **Data flow:**
   - The phone pushes a snapshot (next event, today's tasks, budget left, net
     worth) via WatchConnectivity `applicationContext`.
   - The watch sends actions (check-off, capture text) via `sendMessage`, or
     `transferUserInfo` when the phone is unreachable (queued delivery).
   - The phone applies the action and confirms; the next snapshot reflects it.
+  - The complication extension cannot receive WatchConnectivity. The watch
+    app writes the snapshot into a shared container (App Groups on watchOS,
+    **VERIFY**) that complications read. Fallback: Keychain access group (as
+    in §2.4); else complications show no data and a tap opens the app.
   - Direct EventKit on the watch: **VERIFY** (spike). Fallback is the
     phone-relayed data above.
+- **Lock:** while Finance lock or whole-app lock (§5) is on, the phone omits
+  money fields (budget left, net worth) from the snapshot. Watch UI uses
+  `privacySensitive()` so amounts redact when the wrist is locked or in
+  always-on.
 - **Notifications:** local notifications from the phone app mirror to the
   watch automatically (system behavior) when the phone is locked. No watch
   work needed.
@@ -396,6 +403,7 @@ Xcode with the free Personal Team (see §2.2). Built in Phase 9.
 - watchOS app install on a free account, plus WatchConnectivity round-trip.
 - EventKit access on watchOS (read and complete reminders directly).
 - Watch complications (widget) extension on a free account.
+- App Groups on watchOS (complication data sharing).
 
 ## 10. Phased build plan
 
@@ -426,4 +434,4 @@ See `README.md` for the branch model (`main`, `develop`, `feature/<issue#>-<slug
 
 ## 12. Spike results
 
-To be filled in when the Phase 1 capability spike is complete.
+To be filled in as capability spikes (Phase 1, Phase 9) complete.
