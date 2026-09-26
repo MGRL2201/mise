@@ -16,6 +16,12 @@ struct SettingsView: View {
     @State private var isImporting = false
     @State private var restoreURL: URL?
     @State private var backupError: String?
+    @AppStorage(AutoBackup.enabledKey) private var autoBackupEnabled = false
+    @AppStorage(AutoBackup.keepKey) private var autoBackupKeep = 4
+    @AppStorage(AutoBackup.lastKey) private var autoBackupLast: Date?
+    @AppStorage(AutoBackup.lastErrorKey) private var autoBackupError: String?
+    @State private var autoBackupFolder = AutoBackup.folderURL()?.lastPathComponent
+    @State private var isPickingFolder = false
 
     var body: some View {
         @Bindable var lock = lock
@@ -91,6 +97,29 @@ struct SettingsView: View {
                     }
                 }
                 Button("Restore from backup…") { isImporting = true }
+                Toggle("Weekly automatic backup", isOn: $autoBackupEnabled)
+                Button("Choose folder…") { isPickingFolder = true }
+                    .fileImporter(isPresented: $isPickingFolder, allowedContentTypes: [.folder]) { result in
+                        do {
+                            let url = try result.get()
+                            let accessing = url.startAccessingSecurityScopedResource()
+                            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+                            try AutoBackup.setFolder(url)
+                            autoBackupFolder = url.lastPathComponent
+                            AutoBackup.run(context: modelContext)
+                        } catch {
+                            backupError = error.localizedDescription
+                        }
+                    }
+                Text(autoBackupFolder.map { "Folder: \($0)" } ?? "No folder chosen.")
+                    .foregroundStyle(.secondary)
+                Stepper("Keep last \(autoBackupKeep)", value: $autoBackupKeep, in: 1...20)
+                if let autoBackupLast {
+                    Text("Last automatic backup: \(autoBackupLast.formatted())").foregroundStyle(.secondary)
+                }
+                if let autoBackupError {
+                    Text(autoBackupError).foregroundStyle(.red)
+                }
             } header: {
                 Text("Backup")
             } footer: {
