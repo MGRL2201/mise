@@ -63,9 +63,12 @@ enum AutoBackup {
 
         let data = try BackupService.export(context: context, files: AttachmentFileStore(), defaults: defaults)
         try data.write(to: folder.appending(path: "mise-auto-\(stamp.string(from: now)).json"), options: .atomic)
+        // Backup itself succeeded once the file is written; record `last` now so a prune
+        // failure below doesn't leave `last` unset and cause every future foreground event
+        // to write another backup (unbounded growth). Prune errors still propagate to `run`.
+        defaults.set(now, forKey: lastKey)
         let existing = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
         for url in filesToPrune(existing, keep: keep(defaults)) { try FileManager.default.removeItem(at: url) }
-        defaults.set(now, forKey: lastKey)
         return true
     }
 

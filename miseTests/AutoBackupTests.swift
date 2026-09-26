@@ -50,4 +50,29 @@ struct AutoBackupTests {
         #expect(try autoFiles().count == 4)
         #expect(FileManager.default.fileExists(atPath: other.path))
     }
+
+    @Test func runIfDueRecordsLastEvenWhenPruneFails() throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let stale = folder.appending(path: "mise-auto-20200101-000000.json")
+        try Data("x".utf8).write(to: stale)
+        // Immutable flag blocks deletion regardless of directory write permission, so
+        // pruning this file fails while writing the new backup file still succeeds.
+        try FileManager.default.setAttributes([.immutable: true], ofItemAtPath: stale.path)
+        defer { try? FileManager.default.setAttributes([.immutable: false], ofItemAtPath: stale.path) }
+
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        defaults.set(true, forKey: AutoBackup.enabledKey)
+        defaults.set(1, forKey: AutoBackup.keepKey) // keep only the new file, so the stale one must be pruned
+        try AutoBackup.setFolder(folder, defaults: defaults)
+        let container = try ModelContainer(for: Schema(Storage.models),
+                                           configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let context = container.mainContext
+
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        #expect(throws: (any Error).self) {
+            try AutoBackup.runIfDue(context: context, defaults: defaults, now: now)
+        }
+        #expect(defaults.object(forKey: AutoBackup.lastKey) as? Date == now)
+    }
 }
