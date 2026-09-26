@@ -1,0 +1,5 @@
+// Committed defaults. Put your own values in Config/Signing.local.xcconfig (git-ignored).
+MISE_BUNDLE_PREFIX = com.example
+DEVELOPMENT_TEAM =
+CODE_SIGN_STYLE = Automatic
+#include? "Signing.local.xcconfig"
