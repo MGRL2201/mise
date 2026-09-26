@@ -12,11 +12,3 @@ struct MiseApp: App {
         .modelContainer(container)
     }
 }
-
-struct ContentView: View {
-    static let title = "mise"
-
-    var body: some View {
-        Text(Self.title)
-    }
-}
