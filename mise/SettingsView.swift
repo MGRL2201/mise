@@ -17,6 +17,13 @@ struct SettingsView: View {
                 colorPicker("Background", \.background)
                 colorPicker("Surface", \.surface)
                 colorPicker("Text", \.text)
+                ForEach(editingVariant.contrastWarnings, id: \.pair) { warning in
+                    Label(
+                        "\(warning.pair) contrast is \(warning.ratio, format: .number.precision(.fractionLength(1))):1",
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .foregroundStyle(.orange)
+                }
             }
             .listRowBackground(Color(theme.surface))
 
@@ -37,6 +44,10 @@ struct SettingsView: View {
         }
         .navigationTitle("Settings")
         .themedBackground()
+    }
+
+    private var editingVariant: Palette.Variant {
+        editingDark ? store.palette.dark : store.palette.light
     }
 
     private func colorPicker(
