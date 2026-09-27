@@ -65,4 +65,27 @@ struct QuickAddTests {
         #expect(RecurrencePreset(reminder.recurrenceRules?.first) == .monthly)
         #expect(reminder.calendar?.title == "Bills")
     }
+
+    @Test func mergingKeepsDeterministicFields() {
+        let today = Self.day(9, 27)
+        let marked = QuickAdd(title: "pay rent", priority: 1)
+            .merging(QuickTaskFields(title: " NIL ", priority: .low, recurrence: .monthly), today: today)
+        #expect(marked == QuickAdd(title: "pay rent", due: today, recurrence: .monthly, priority: 1))
+
+        let parsed = QuickAdd(title: "gym", due: Self.day(10, 1, 7), recurrence: .weekly)
+            .merging(QuickTaskFields(title: "Gym", priority: .high, recurrence: .daily), today: today)
+        #expect(parsed == QuickAdd(title: "Gym", due: Self.day(10, 1, 7), recurrence: .weekly, priority: 1))
+    }
+
+    // Simulator can report available yet throw on every call; parseSmart must fall back either way.
+    @Test
+    func parseSmartKeepsDeterministicFields() async {
+        let input = "pay rent every 1st 9am !high"
+        let smart = await QuickAdd.parseSmart(input, lists: [], now: Self.now)
+        let plain = QuickAdd.parse(input, lists: [], now: Self.now)
+        #expect(smart.due == plain.due)
+        #expect(smart.recurrence == plain.recurrence)
+        #expect(smart.priority == plain.priority)
+        #expect(!smart.title.isEmpty)
+    }
 }

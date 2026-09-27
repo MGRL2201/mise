@@ -208,6 +208,8 @@ struct TasksView: View {
     @State private var mode = TaskViewMode.today
     @State private var editing: EditingReminder?
     @State private var filterTag: String?
+    @State private var quickText = ""
+    @State private var parsing = false
     @Query(sort: \Tag.name) private var tags: [Tag]
     @Query private var extras: [TaskExtras]
 
@@ -231,6 +233,19 @@ struct TasksView: View {
                 }
                 if store.hasAccess {
                     Button("New Task", systemImage: "plus") { editing = EditingReminder(reminder: store.newReminder()) }
+                        .disabled(parsing)
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                if store.hasAccess {
+                    HStack {
+                        TextField("Quick add", text: $quickText, prompt: Text("Quick add: pay rent every 1st 9am !high"))
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit(quickAdd)
+                            .disabled(parsing)
+                        if parsing { ProgressView().controlSize(.small) }
+                    }
+                    .padding()
                 }
             }
             .sheet(item: $editing) { TaskEditor(reminder: $0.reminder) }
@@ -246,6 +261,23 @@ struct TasksView: View {
             } message: { message in
                 Text(message)
             }
+    }
+
+    /// Parsed fields land in the editor sheet for confirmation; nothing is saved until the user saves there.
+    private func quickAdd() {
+        let text = quickText
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        parsing = true
+        Task {
+            // ponytail: two writable lists with the same title resolve to the first; user confirms in editor.
+            let writable = store.lists.filter(\.allowsContentModifications)
+            let q = await QuickAdd.parseSmart(text, lists: writable.map(\.title))
+            let r = store.newReminder()
+            q.apply(to: r, lists: writable)
+            quickText = ""
+            parsing = false
+            editing = EditingReminder(reminder: r)
+        }
     }
 
     @ViewBuilder

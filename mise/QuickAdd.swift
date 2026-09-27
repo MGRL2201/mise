@@ -1,4 +1,5 @@
 import Foundation
+import FoundationModels
 @preconcurrency import EventKit
 
 /// Deterministic parse of a one-line task ("pay rent every 1st 9am !high") into reminder fields.
@@ -158,6 +159,42 @@ struct QuickAdd: Equatable {
         return hour < 24 ? (hour, minute) : nil
     }
 
+    /// Fills gaps from the model; deterministic fields always win. Pure, so testable without the model.
+    func merging(_ f: QuickTaskFields, today: DateComponents) -> QuickAdd {
+        var result = self
+        let title = f.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !title.isEmpty, title.lowercased() != "nil" { result.title = title }
+        if priority == 0, let p = f.priority {
+            result.priority = switch p { case .high: 1; case .medium: 5; case .low: 9 }
+        }
+        if recurrence == .none, let r = f.recurrence {
+            result.recurrence = switch r {
+            case .daily: .daily
+            case .weekdays: .weekdays
+            case .weekly: .weekly
+            case .biweekly: .biweekly
+            case .monthly: .monthly
+            case .yearly: .yearly
+            }
+            if due == nil { result.due = today }  // EventKit requires a due date for recurrence
+        }
+        return result
+    }
+
+    /// `parse`, then the on-device model tidies the title and fills priority/recurrence the markers missed.
+    /// Any model failure (unavailable, guardrail, simulator error 1026) returns the deterministic result.
+    static func parseSmart(_ text: String, lists: [String], now: Date = .now) async -> QuickAdd {
+        let plain = parse(text, lists: lists, now: now)
+        guard OnDeviceAI.unavailableReason == nil else { return plain }
+        let session = LanguageModelSession(instructions: """
+            Extract a to-do item from a personal organizer app. \
+            Only fill priority or recurrence when the text clearly says so.
+            """)
+        // The deterministic title is already stripped of markers and dates (also avoids a "!high" guardrail false positive).
+        guard let fields = try? await session.respond(to: plain.title, generating: QuickTaskFields.self).content else { return plain }
+        return plain.merging(fields, today: Calendar.current.dateComponents([.year, .month, .day], from: now))
+    }
+
     func apply(to reminder: EKReminder, lists: [EKCalendar]) {
         reminder.title = title
         reminder.priority = priority
@@ -167,4 +204,20 @@ struct QuickAdd: Equatable {
             reminder.calendar = list
         }
     }
+}
+
+/// Model output for quick add. No date field: model dates are unreliable, so dates stay in `QuickAdd.parse`.
+@Generable
+struct QuickTaskFields {
+    @Generable
+    enum Priority { case high, medium, low }
+    @Generable
+    enum Repeat { case daily, weekdays, weekly, biweekly, monthly, yearly }
+
+    @Guide(description: "Short task title, without dates, times, recurrence or priority words")
+    var title: String
+    @Guide(description: "Only if the text says it is urgent, important, low priority or similar")
+    var priority: Priority?
+    @Guide(description: "Only if the text says it repeats")
+    var recurrence: Repeat?
 }
