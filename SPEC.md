@@ -460,6 +460,10 @@ To be filled in as capability spikes (Phase 1, Phase 9) complete.
   widget-readable group. Keep the app-private group
   `$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)` first;
   `KeychainTests.setUsesAppPrivateGroupNotSharedGroup` guards it.
+- **Gotcha:** SwiftData's default ModelConfiguration moves the store into the
+  first App Group when the entitlement exists — use `groupContainer: .none`
+  to keep it app-private. `StorageTests.storeIsNotInAppGroupContainer`
+  guards it.
 - **App IDs used:** 1 (widget, reused by #11).
 - **Chosen path:** App Group container/defaults for app↔extension data; the
   shared keychain group only for small secrets an extension needs. The
