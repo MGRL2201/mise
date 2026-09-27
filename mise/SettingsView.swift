@@ -142,6 +142,13 @@ struct SettingsView: View {
             }
             .listRowBackground(Color(theme.surface))
 
+            #if os(iOS)
+            Section("Appearance") {
+                NavigationLink("App icon") { AppIconPicker() }
+            }
+            .listRowBackground(Color(theme.surface))
+            #endif
+
             Section("Theme") {
                 Picker("Variant", selection: $editingDark) {
                     Text("Light").tag(false)
