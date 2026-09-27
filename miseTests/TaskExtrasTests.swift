@@ -103,4 +103,25 @@ struct TaskExtrasTests {
         #expect(try mise.Tag.named(" work ", in: context) === work)
         #expect(try context.fetch(FetchDescriptor<mise.Tag>()).count == 1)
     }
+    @Test func writeCreatesUpdatesAndSkipsEmpty() throws {
+        let context = context()
+        try TaskExtras.write(in: context, reminderID: "none", externalID: nil, subtasks: [], tagNames: [])
+        #expect(try context.fetch(FetchDescriptor<TaskExtras>()).isEmpty)
+
+        let subtasks = [Subtask(title: "one"), Subtask(title: "two", done: true)]
+        try TaskExtras.write(in: context, reminderID: "r", externalID: "x", subtasks: subtasks, tagNames: ["Work", "Home"])
+        var rows = try context.fetch(FetchDescriptor<TaskExtras>())
+        #expect(rows.count == 1)
+        #expect(rows.first?.subtasks == subtasks)
+        #expect(Set((rows.first?.tags ?? []).map(\.name)) == ["Work", "Home"])
+
+        try TaskExtras.write(in: context, reminderID: "r2", externalID: "x", subtasks: [Subtask(title: "three")],
+                             tagNames: ["work", " Work "])
+        rows = try context.fetch(FetchDescriptor<TaskExtras>())
+        #expect(rows.count == 1)
+        #expect(rows.first?.reminderID == "r2")
+        #expect(rows.first?.subtasks.map(\.title) == ["three"])
+        #expect(rows.first?.tags?.map(\.name) == ["Work"])
+        #expect(try context.fetch(FetchDescriptor<mise.Tag>()).count == 2)
+    }
 }

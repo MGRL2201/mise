@@ -207,6 +207,9 @@ struct TasksView: View {
     @State private var errorMessage: String?
     @State private var mode = TaskViewMode.today
     @State private var editing: EditingReminder?
+    @State private var filterTag: String?
+    @Query(sort: \Tag.name) private var tags: [Tag]
+    @Query private var extras: [TaskExtras]
 
     private struct EditingReminder: Identifiable {
         let reminder: EKReminder
@@ -218,6 +221,14 @@ struct TasksView: View {
             .navigationTitle("Tasks")
             .themedBackground()
             .toolbar {
+                if store.hasAccess && !tags.isEmpty {
+                    Menu("Tag", systemImage: filterTag == nil ? "tag" : "tag.fill") {
+                        Picker("Tag", selection: $filterTag) {
+                            Text("All Tags").tag(String?.none)
+                            ForEach(tags.map(\.name), id: \.self) { Text($0).tag(Optional($0)) }
+                        }
+                    }
+                }
                 if store.hasAccess {
                     Button("New Task", systemImage: "plus") { editing = EditingReminder(reminder: store.newReminder()) }
                 }
@@ -304,7 +315,13 @@ struct TasksView: View {
                 .reversed()
                 .map { (dayTitle($0.day), $0.items) }
         }
-        return result.filter { !$0.items.isEmpty }
+        // A tag removed elsewhere (restore) stops filtering instead of hiding everything.
+        guard let filterTag, tags.contains(where: { $0.name == filterTag }) else { return result.filter { !$0.items.isEmpty } }
+        let tagged = { (r: EKReminder) in
+            TaskExtras.match(extras, id: r.calendarItemIdentifier, externalID: r.calendarItemExternalIdentifier)?
+                .tags?.contains { $0.name == filterTag } ?? false
+        }
+        return result.map { ($0.title, $0.items.filter(tagged)) }.filter { !$0.items.isEmpty }
     }
 
     @ViewBuilder

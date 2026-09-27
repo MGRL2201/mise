@@ -55,6 +55,28 @@ final class TaskExtras {
         return all.first { $0.externalID == externalID }
     }
 
+    /// Writes the editor's draft for a saved reminder: replaces subtasks and tags on the
+    /// matching row, creating one only when there is something to store. Saves.
+    static func write(in context: ModelContext, reminderID: String, externalID: String?,
+                      subtasks: [Subtask], tagNames: [String]) throws {
+        var tags: [Tag] = []
+        for name in tagNames {
+            if let tag = try Tag.named(name, in: context), !tags.contains(where: { $0 === tag }) { tags.append(tag) }
+        }
+        var row = match(try context.fetch(FetchDescriptor<TaskExtras>()), id: reminderID, externalID: externalID)
+        if row == nil, !subtasks.isEmpty || !tags.isEmpty {
+            row = TaskExtras(reminderID: reminderID, externalID: externalID)
+            context.insert(row!)
+        }
+        if let row {
+            row.reminderID = reminderID
+            row.externalID = externalID
+            row.subtasks = subtasks
+            row.tags = tags
+        }
+        try context.save()
+    }
+
     /// Keeps extras whose reminder is listed (relinking on id change, merging into
     /// any row that already owns the new id). Rows whose reminder is neither listed
     /// nor `exists` (e.g. an old completed reminder outside the fetch window) are

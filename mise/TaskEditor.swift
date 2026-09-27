@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 @preconcurrency import EventKit
 
 // ponytail: custom = frequency + "every N" only; end dates and specific weekdays aren't editable yet (existing ones survive untouched).
@@ -119,7 +120,15 @@ struct TaskEditor: View {
     let reminder: EKReminder
     @Environment(RemindersStore.self) private var store
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Query private var allExtras: [TaskExtras]
+    @Query(sort: \Tag.name) private var allTags: [Tag]
     @State private var draft: TaskDraft
+    @State private var subtasks: [Subtask] = []
+    @State private var tagNames: [String] = []
+    @State private var newSubtask = ""
+    @State private var newTag = ""
+    @State private var loadedExtras = false
     @State private var errorMessage: String?
     @State private var confirmingDelete = false
 
@@ -185,6 +194,47 @@ struct TaskEditor: View {
                         draft.alarms.append(draft.hasDueDate ? draft.dueDate : .now.addingTimeInterval(3600))
                     }
                 }
+                Section("Subtasks") {
+                    ForEach($subtasks) { $subtask in
+                        HStack {
+                            Button(subtask.done ? "Mark Incomplete" : "Mark Complete",
+                                   systemImage: subtask.done ? "checkmark.circle.fill" : "circle") { subtask.done.toggle() }
+                                .labelStyle(.iconOnly)
+                                .buttonStyle(.plain)
+                            TextField("Subtask", text: $subtask.title)
+                        }
+                    }
+                    .onDelete { subtasks.remove(atOffsets: $0) }
+                    .onMove { subtasks.move(fromOffsets: $0, toOffset: $1) }
+                    TextField("New Subtask", text: $newSubtask)
+                        .onSubmit {
+                            let title = newSubtask.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if !title.isEmpty { subtasks.append(Subtask(title: title)) }
+                            newSubtask = ""
+                        }
+                }
+                Section("Tags") {
+                    ForEach(tagNames, id: \.self) { name in
+                        HStack {
+                            Text(name)
+                            Spacer()
+                            Button("Remove Tag \(name)", systemImage: "minus.circle.fill") { tagNames.removeAll { $0 == name } }
+                                .labelStyle(.iconOnly)
+                                .buttonStyle(.borderless)
+                        }
+                    }
+                    TextField("Add Tag", text: $newTag)
+                        .onSubmit {
+                            addTag(newTag)
+                            newTag = ""
+                        }
+                    let available = allTags.map(\.name).filter { !hasTag($0) }
+                    if !available.isEmpty {
+                        Menu("Existing Tags") {
+                            ForEach(available, id: \.self) { name in Button(name) { addTag(name) } }
+                        }
+                    }
+                }
                 if !isNew {
                     Section {
                         Button("Delete Task", role: .destructive) { confirmingDelete = true }
@@ -204,10 +254,21 @@ struct TaskEditor: View {
                         mutate {
                             draft.apply(to: reminder, lists: store.lists)
                             try store.save(reminder)
+                            try TaskExtras.write(in: modelContext, reminderID: reminder.calendarItemIdentifier,
+                                                 externalID: reminder.calendarItemExternalIdentifier,
+                                                 subtasks: subtasks, tagNames: tagNames)
                         }
                     }
                     .disabled(draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
+            }
+            .onAppear {
+                guard !loadedExtras else { return }
+                loadedExtras = true
+                let extras = TaskExtras.match(allExtras, id: reminder.calendarItemIdentifier,
+                                              externalID: reminder.calendarItemExternalIdentifier)
+                subtasks = extras?.subtasks ?? []
+                tagNames = (extras?.tags ?? []).map(\.name).sorted()
             }
             .confirmationDialog("Delete this task?", isPresented: $confirmingDelete) {
                 Button("Delete Task", role: .destructive) { mutate { try store.delete(reminder) } }
@@ -222,6 +283,15 @@ struct TaskEditor: View {
                 Text(message)
             }
         }
+    }
+
+    private func hasTag(_ name: String) -> Bool {
+        tagNames.contains { $0.caseInsensitiveCompare(name) == .orderedSame }
+    }
+
+    private func addTag(_ name: String) {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !name.isEmpty && !hasTag(name) { tagNames.append(name) }
     }
 
     /// Runs the action and dismisses; on failure stays open with an alert.
