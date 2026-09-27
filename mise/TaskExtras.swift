@@ -3,6 +3,7 @@ import SwiftData
 
 /// A user tag. Name identity (trimmed, case-insensitive) is enforced in code,
 /// not by a unique attribute, so CloudKit stays possible.
+// ponytail: tags with no tasks persist on purpose (Notes will share them); no delete/rename UI yet.
 @Model
 final class Tag {
     var name: String = ""
@@ -59,6 +60,7 @@ final class TaskExtras {
     /// matching row, creating one only when there is something to store. Saves.
     static func write(in context: ModelContext, reminderID: String, externalID: String?,
                       subtasks: [Subtask], tagNames: [String]) throws {
+        let subtasks = subtasks.filter { !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         var tags: [Tag] = []
         for name in tagNames {
             if let tag = try Tag.named(name, in: context), !tags.contains(where: { $0 === tag }) { tags.append(tag) }
@@ -74,7 +76,7 @@ final class TaskExtras {
             row.subtasks = subtasks
             row.tags = tags
         }
-        try context.save()
+        do { try context.save() } catch { context.rollback(); throw error }
     }
 
     /// Keeps extras whose reminder is listed (relinking on id change, merging into

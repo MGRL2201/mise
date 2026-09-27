@@ -124,4 +124,14 @@ struct TaskExtrasTests {
         #expect(rows.first?.tags?.map(\.name) == ["Work"])
         #expect(try context.fetch(FetchDescriptor<mise.Tag>()).count == 2)
     }
+
+    @Test func writeDropsBlankSubtasks() throws {
+        let context = context()
+        try TaskExtras.write(in: context, reminderID: "blank", externalID: nil, subtasks: [Subtask(title: "  ")], tagNames: [])
+        #expect(try context.fetch(FetchDescriptor<TaskExtras>()).isEmpty)
+
+        try TaskExtras.write(in: context, reminderID: "r", externalID: nil,
+                             subtasks: [Subtask(title: "keep"), Subtask(title: " \n")], tagNames: [])
+        #expect(try context.fetch(FetchDescriptor<TaskExtras>()).first?.subtasks.map(\.title) == ["keep"])
+    }
 }

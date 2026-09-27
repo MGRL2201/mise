@@ -222,7 +222,7 @@ struct TasksView: View {
             .themedBackground()
             .toolbar {
                 if store.hasAccess && !tags.isEmpty {
-                    Menu("Tag", systemImage: filterTag == nil ? "tag" : "tag.fill") {
+                    Menu("Tag", systemImage: activeTag == nil ? "tag" : "tag.fill") {
                         Picker("Tag", selection: $filterTag) {
                             Text("All Tags").tag(String?.none)
                             ForEach(tags.map(\.name), id: \.self) { Text($0).tag(Optional($0)) }
@@ -286,6 +286,12 @@ struct TasksView: View {
         }
     }
 
+    /// The filter tag, if it still exists: a tag removed elsewhere (restore) stops
+    /// filtering instead of hiding everything.
+    private var activeTag: String? {
+        filterTag.flatMap { name in tags.contains { $0.name == name } ? name : nil }
+    }
+
     private var sections: [(title: String, items: [EKReminder])] {
         let calendar = Calendar.current
         let now = Date.now
@@ -315,11 +321,10 @@ struct TasksView: View {
                 .reversed()
                 .map { (dayTitle($0.day), $0.items) }
         }
-        // A tag removed elsewhere (restore) stops filtering instead of hiding everything.
-        guard let filterTag, tags.contains(where: { $0.name == filterTag }) else { return result.filter { !$0.items.isEmpty } }
+        guard let activeTag else { return result.filter { !$0.items.isEmpty } }
         let tagged = { (r: EKReminder) in
             TaskExtras.match(extras, id: r.calendarItemIdentifier, externalID: r.calendarItemExternalIdentifier)?
-                .tags?.contains { $0.name == filterTag } ?? false
+                .tags?.contains { $0.name == activeTag } ?? false
         }
         return result.map { ($0.title, $0.items.filter(tagged)) }.filter { !$0.items.isEmpty }
     }
@@ -328,7 +333,7 @@ struct TasksView: View {
     private var remindersList: some View {
         let sections = sections
         if sections.isEmpty {
-            ContentUnavailableView(mode.emptyTitle, systemImage: "checklist")
+            ContentUnavailableView(activeTag.map { "No Tasks Tagged \($0)" } ?? mode.emptyTitle, systemImage: "checklist")
         } else {
             List {
                 ForEach(sections.indices, id: \.self) { index in

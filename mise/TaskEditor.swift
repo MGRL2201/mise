@@ -121,7 +121,6 @@ struct TaskEditor: View {
     @Environment(RemindersStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
-    @Query private var allExtras: [TaskExtras]
     @Query(sort: \Tag.name) private var allTags: [Tag]
     @State private var draft: TaskDraft
     @State private var subtasks: [Subtask] = []
@@ -194,24 +193,43 @@ struct TaskEditor: View {
                         draft.alarms.append(draft.hasDueDate ? draft.dueDate : .now.addingTimeInterval(3600))
                     }
                 }
-                Section("Subtasks") {
+                Section {
                     ForEach($subtasks) { $subtask in
                         HStack {
-                            Button(subtask.done ? "Mark Incomplete" : "Mark Complete",
+                            Button(subtask.title.isEmpty ? "Subtask" : subtask.title,
                                    systemImage: subtask.done ? "checkmark.circle.fill" : "circle") { subtask.done.toggle() }
                                 .labelStyle(.iconOnly)
                                 .buttonStyle(.plain)
+                                .accessibilityValue(subtask.done ? "Complete" : "Incomplete")
                             TextField("Subtask", text: $subtask.title)
+                            Button("Remove Subtask", systemImage: "minus.circle.fill") {
+                                subtasks.removeAll { $0.id == subtask.id }
+                            }
+                            .labelStyle(.iconOnly)
+                            .buttonStyle(.borderless)
                         }
+                        #if os(macOS)
+                        .contextMenu {
+                            let index = subtasks.firstIndex { $0.id == subtask.id } ?? 0
+                            Button("Move Up") { subtasks.swapAt(index, index - 1) }
+                                .disabled(index == 0)
+                            Button("Move Down") { subtasks.swapAt(index, index + 1) }
+                                .disabled(index == subtasks.count - 1)
+                        }
+                        #endif
                     }
                     .onDelete { subtasks.remove(atOffsets: $0) }
                     .onMove { subtasks.move(fromOffsets: $0, toOffset: $1) }
                     TextField("New Subtask", text: $newSubtask)
-                        .onSubmit {
-                            let title = newSubtask.trimmingCharacters(in: .whitespacesAndNewlines)
-                            if !title.isEmpty { subtasks.append(Subtask(title: title)) }
-                            newSubtask = ""
-                        }
+                        .onSubmit(addSubtask)
+                } header: {
+                    HStack {
+                        Text("Subtasks")
+                        #if os(iOS)
+                        Spacer()
+                        EditButton()
+                        #endif
+                    }
                 }
                 Section("Tags") {
                     ForEach(tagNames, id: \.self) { name in
@@ -251,6 +269,9 @@ struct TaskEditor: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
+                        addSubtask()
+                        addTag(newTag)
+                        newTag = ""
                         mutate {
                             draft.apply(to: reminder, lists: store.lists)
                             try store.save(reminder)
@@ -265,7 +286,7 @@ struct TaskEditor: View {
             .onAppear {
                 guard !loadedExtras else { return }
                 loadedExtras = true
-                let extras = TaskExtras.match(allExtras, id: reminder.calendarItemIdentifier,
+                let extras = TaskExtras.match((try? modelContext.fetch(FetchDescriptor<TaskExtras>())) ?? [], id: reminder.calendarItemIdentifier,
                                               externalID: reminder.calendarItemExternalIdentifier)
                 subtasks = extras?.subtasks ?? []
                 tagNames = (extras?.tags ?? []).map(\.name).sorted()
@@ -287,6 +308,12 @@ struct TaskEditor: View {
 
     private func hasTag(_ name: String) -> Bool {
         tagNames.contains { $0.caseInsensitiveCompare(name) == .orderedSame }
+    }
+
+    private func addSubtask() {
+        let title = newSubtask.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !title.isEmpty { subtasks.append(Subtask(title: title)) }
+        newSubtask = ""
     }
 
     private func addTag(_ name: String) {
