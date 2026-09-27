@@ -51,13 +51,17 @@ import UIKit
         let fetched = await fetchAllReminders()
         guard generation == refreshGeneration else { return }
         lists = newLists
-        reminders = fetched.sorted { lhs, rhs in
-            if lhs.isCompleted != rhs.isCompleted { return !lhs.isCompleted }
-            switch (lhs.dueDate, rhs.dueDate) {
-            case (.some(let l), .some(let r)) where l != r: return l < r
-            case (.some, .none): return true
-            case (.none, .some): return false
-            default: return (lhs.title ?? "") < (rhs.title ?? "")
+        // Refetched EKReminders are == the old ones (isEqual) even after an
+        // external edit, so a plain assignment skips @Observable's notify (#126).
+        withMutation(keyPath: \.reminders) {
+            reminders = fetched.sorted { lhs, rhs in
+                if lhs.isCompleted != rhs.isCompleted { return !lhs.isCompleted }
+                switch (lhs.dueDate, rhs.dueDate) {
+                case (.some(let l), .some(let r)) where l != r: return l < r
+                case (.some, .none): return true
+                case (.none, .some): return false
+                default: return (lhs.title ?? "") < (rhs.title ?? "")
+                }
             }
         }
         guard let context else { return }

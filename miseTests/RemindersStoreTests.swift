@@ -38,6 +38,17 @@ struct RemindersStoreTests {
         // notification loop alone — no manual refresh.
         let otherStore = EKEventStore()
         let editedTitle = "mise test reminder edited externally"
+        // Our own saves above post EKEventStoreChanged too; wait for those
+        // refreshes to drain so only the external edit can fire the flag.
+        // Bounded so a steady notification stream can't hang the test.
+        var changed: Flag
+        var quietChecks = 0
+        repeat {
+            changed = Flag()
+            withObservationTracking { _ = store.reminders } onChange: { [changed] in changed.fired = true }
+            try await Task.sleep(nanoseconds: 500_000_000)
+            quietChecks += 1
+        } while changed.fired && quietChecks < 20
         try await pollUntil(timeout: 5) {
             guard let external = otherStore.calendarItem(withIdentifier: identifier) as? EKReminder else {
                 return false
@@ -50,6 +61,8 @@ struct RemindersStoreTests {
         try await pollUntil(timeout: 5) {
             store.reminders.first { $0.calendarItemIdentifier == identifier }?.title == editedTitle
         }
+        // #126: SwiftUI only re-renders if observers are notified.
+        try await pollUntil(timeout: 5) { changed.fired }
 
         guard let externalToRemove = otherStore.calendarItem(withIdentifier: identifier) as? EKReminder else {
             Issue.record("could not re-fetch reminder from second store")
