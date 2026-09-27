@@ -25,7 +25,10 @@ struct QuickAddTests {
         ("water plants every day", QuickAdd(title: "water plants", due: day(9, 27), recurrence: .daily)),
         ("gym every monday 7am", QuickAdd(title: "gym", due: day(9, 28, 7), recurrence: .weekly)),
         ("buy milk #homestuff !low", QuickAdd(title: "buy milk", priority: 9, listName: "Home Stuff")),
-        ("read #unknown tag", QuickAdd(title: "read #unknown tag")),
+        ("read #unknown tag", QuickAdd(title: "read tag", unknownList: "unknown")),
+        ("buy milk #Grocries,", QuickAdd(title: "buy milk", unknownList: "Grocries")),
+        ("fix issue #1", QuickAdd(title: "fix issue #1")),
+        ("#homestuff", QuickAdd(title: "", listName: "Home Stuff")),
         ("standup 9am", QuickAdd(title: "standup", due: day(9, 28, 9))),
         ("pay taxes in 2 weeks", QuickAdd(title: "pay taxes", due: day(10, 11))),
         ("plain title", QuickAdd(title: "plain title")),
@@ -48,6 +51,17 @@ struct QuickAddTests {
         for (input, expected) in Self.fixtures {
             let parsed = QuickAdd.parse(input, lists: Self.lists, now: Self.now, calendar: Self.calendar)
             #expect(parsed == expected, "\(input)")
+        }
+    }
+
+    @Test func closeMatchFindsTyposPrefixesAndCase() {
+        let lists = ["Inbox", "Home Stuff", "Bills", "Groceries"]
+        let cases: [(String, String?)] = [
+            ("grocries", "Groceries"), ("groc", "Groceries"), ("HOMESTUFF", "Home Stuff"), ("bils", "Bills"),
+            ("xyz", nil), ("gr", nil), ("work", nil),
+        ]
+        for (name, expected) in cases {
+            #expect(QuickAdd.closeMatch(name, in: lists) == expected, "\(name)")
         }
     }
 

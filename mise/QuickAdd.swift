@@ -10,6 +10,7 @@ struct QuickAdd: Equatable {
     var recurrence = RecurrencePreset.none
     var priority = 0                  // EventKit raw: 1 high, 5 medium, 9 low, 0 none
     var listName: String?             // exact title of the matched list
+    var unknownList: String?          // first `#name` that matched no list, as typed
 
     private static let priorities = ["!high": 1, "!!!": 1, "!med": 5, "!medium": 5, "!!": 5, "!low": 9, "!": 9]
     private static let recurrenceWords: [String: RecurrencePreset] = [
@@ -34,6 +35,7 @@ struct QuickAdd: Equatable {
         let today = calendar.startOfDay(for: now)
         var result = QuickAdd(title: "")
         var kept: [String] = []
+        var tags: Set<String> = []  // consumed `#list` tokens, kept out of the title fallback too
         var day: Date?
         var time: (hour: Int, minute: Int)?
         var tonight = false
@@ -53,9 +55,13 @@ struct QuickAdd: Equatable {
             let afterNext = i + 2 < lower.count ? lower[i + 2] : ""
             if let p = priorities[w] {
                 result.priority = p
-            } else if w.hasPrefix("#"),
-                      let list = lists.first(where: { $0.replacingOccurrences(of: " ", with: "").lowercased() == w.dropFirst() }) {
-                result.listName = list
+            } else if w.hasPrefix("#"), w.contains(where: \.isLetter) {  // "#1" stays in the title
+                if let list = lists.first(where: { $0.replacingOccurrences(of: " ", with: "").lowercased() == w.dropFirst() }) {
+                    result.listName = list
+                } else if result.unknownList == nil {
+                    result.unknownList = String(words[i].trimmingCharacters(in: CharacterSet(charactersIn: ",.;")).dropFirst())
+                }
+                tags.insert(words[i])
             } else if let r = recurrenceWords[w] {
                 result.recurrence = r
             } else if w == "every", let r = everyWords[next] {
@@ -139,8 +145,36 @@ struct QuickAdd: Equatable {
             if let time { due.hour = time.hour; due.minute = time.minute }
             result.due = due
         }
-        result.title = title.isEmpty ? text.trimmingCharacters(in: .whitespacesAndNewlines) : title
+        result.title = title.isEmpty ? words.filter { !tags.contains($0) }.joined(separator: " ") : title
         return result
+    }
+
+    /// Closest list for a mistyped `#name`: case/space-insensitive equal, prefix (3+ chars), or a small typo.
+    static func closeMatch(_ name: String, in lists: [String]) -> String? {
+        func normalized(_ s: String) -> [Character] { Array(s.lowercased().filter { !$0.isWhitespace }) }
+        let n = normalized(name)
+        let limit = n.count <= 4 ? 1 : 2
+        var best: (list: String, distance: Int)?
+        for list in lists {
+            let l = normalized(list)
+            let d = n.count >= 3 && l.starts(with: n) ? 0 : levenshtein(n, l)
+            if d <= limit, d < best?.distance ?? .max { best = (list, d) }
+        }
+        return best?.list
+    }
+
+    private static func levenshtein(_ a: [Character], _ b: [Character]) -> Int {
+        var row = Array(0...b.count)
+        for (i, x) in a.enumerated() {
+            var diagonal = row[0]
+            row[0] = i + 1
+            for (j, y) in b.enumerated() {
+                let above = row[j + 1]
+                row[j + 1] = min(above + 1, row[j] + 1, diagonal + (x == y ? 0 : 1))
+                diagonal = above
+            }
+        }
+        return row[b.count]
     }
 
     /// Calendar weekday (1 = Sunday) for a full or 3-letter name.
@@ -192,7 +226,8 @@ struct QuickAdd: Equatable {
     /// Any model failure (unavailable, guardrail, simulator error 1026) returns the deterministic result.
     static func parseSmart(_ text: String, lists: [String], now: Date = .now) async -> QuickAdd {
         let plain = parse(text, lists: lists, now: now)
-        guard OnDeviceAI.unavailableReason == nil else { return plain }
+        // Empty title (input was only a `#list`): nothing for the model to tidy, and it would invent one.
+        guard OnDeviceAI.unavailableReason == nil, !plain.title.isEmpty else { return plain }
         let session = LanguageModelSession(instructions: """
             Extract a to-do item from a personal organizer app. \
             Only fill priority or recurrence when the text clearly says so.

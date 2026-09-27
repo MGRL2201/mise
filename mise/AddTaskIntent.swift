@@ -24,7 +24,12 @@ struct AddTaskIntent: AppIntent {
             return .result(dialog: "mise needs Reminders access. Open mise and allow access to Reminders.")
         }
         let writable = store.eventStore.calendars(for: .reminder).filter(\.allowsContentModifications)
-        let q = QuickAdd.parse(title, lists: writable.map(\.title), now: .now)
+        var q = QuickAdd.parse(title, lists: writable.map(\.title), now: .now)
+        guard !q.title.isEmpty else {
+            return .result(dialog: "What's the task? Give it a title.")
+        }
+        // Siri can't ask "Did you mean", so take the close match; no list creation from Siri.
+        if q.listName == nil, let n = q.unknownList { q.listName = QuickAdd.closeMatch(n, in: writable.map(\.title)) }
         let r = store.newReminder()
         q.apply(to: r, lists: writable)
         if let due {
