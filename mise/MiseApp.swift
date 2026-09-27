@@ -10,6 +10,7 @@ struct MiseApp: App {
     let container = Storage.makeContainer()
     @State private var themeStore = ThemeStore()
     @State private var appLock = AppLock()
+    @State private var reminders = RemindersStore()
     @Environment(\.scenePhase) private var phase
 
     var body: some Scene {
@@ -19,6 +20,7 @@ struct MiseApp: App {
                 .modifier(ThemeRoot())
                 .environment(themeStore)
                 .environment(appLock)
+                .environment(reminders)
                 .onChange(of: phase, initial: true) { _, phase in
                     switch phase {
                     case .active:
