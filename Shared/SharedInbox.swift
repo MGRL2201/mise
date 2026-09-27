@@ -14,7 +14,10 @@ nonisolated enum SharedInbox {
     static func importFile(at url: URL) throws -> URL {
         guard let folder else { throw NoContainer() }
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let destination = folder.appending(path: "\(UUID().uuidString)-\(url.lastPathComponent)")
+        var base = url.deletingPathExtension().lastPathComponent  // keep `<uuid>-<name>` under 255 bytes
+        while base.utf8.count > 150 { base.removeLast() }
+        let name = url.pathExtension.isEmpty ? base : "\(base).\(url.pathExtension)"
+        let destination = folder.appending(path: "\(UUID().uuidString)-\(name)")
         try FileManager.default.copyItem(at: url, to: destination)
         return destination
     }
@@ -23,7 +26,12 @@ nonisolated enum SharedInbox {
     static func importOpened(_ url: URL) {
         let accessing = url.startAccessingSecurityScopedResource()
         defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-        do { try importFile(at: url) } catch { print("SharedInbox: import failed: \(error)") }
+        do {
+            try importFile(at: url)
+            #if os(iOS)
+            try? FileManager.default.removeItem(at: url)  // iOS copied it into Documents/Inbox; macOS opens in place
+            #endif
+        } catch { print("SharedInbox: import failed: \(error)") }
     }
 
     /// Newest first (by when the file was added to the folder; copies keep the source's dates).

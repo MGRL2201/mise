@@ -539,12 +539,17 @@ To be filled in as capability spikes (Phase 1, Phase 9) complete.
 - **Verified automatically:** device build, iOS Simulator suite (38/38) and
   macOS build pass; `SharedInboxTests` passes on device; install + launch on
   device. Appex Info.plist has `com.apple.share-services`, principal class
-  `miseShare.ShareViewController`, activation rule file/image max 1, display
+  `miseShare.ShareViewController`, activation rule a `SUBQUERY` predicate
+  (exactly one item with one attachment conforming to `com.adobe.pdf` or
+  `public.image`, so mise hides for text/URLs/multiple files), display
   name "mise". App Info.plist has `CFBundleDocumentTypes` (`com.adobe.pdf`,
   `public.image`, Viewer, Alternate).
 - **Not automated:** `devicectl device process launch --payload-url
   file://…` (2 tries) put nothing in the Inbox and printed nothing; the
   payload doesn't seem to reach `onOpenURL`. Left to the manual check.
+  The macOS route (Finder → Open With → mise → `onOpenURL`) is unverified.
+  iOS deletes the system's `Documents/Inbox` copy after import; macOS opens in
+  place, so the original is never deleted there.
 - **Gotcha:** `LSSupportsOpeningDocumentsInPlace = NO` fails the macOS build
   ("not supported on macOS"), and leaving it out with document types present
   counts as NO. Set per SDK: NO on iOS (system copies the file in), YES on
