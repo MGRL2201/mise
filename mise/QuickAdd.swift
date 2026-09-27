@@ -19,6 +19,12 @@ struct QuickAdd: Equatable {
     private static let everyWords: [String: RecurrencePreset] = [
         "day": .daily, "weekday": .weekdays, "week": .weekly, "month": .monthly, "year": .yearly,
     ]
+    // Model priority/recurrence only count when the raw text has one of these whole words.
+    private static let priorityCues: Set = ["urgent", "urgently", "asap", "important", "critical", "crucial", "priority"]
+    private static let recurrenceCues: Set = [
+        "every", "each", "repeat", "repeats", "repeating", "recurring", "daily", "nightly", "weekly",
+        "weekdays", "biweekly", "fortnightly", "monthly", "yearly", "annually",
+    ]
     private static let weekdayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
 
     /// Callers must skip empty/whitespace-only input: the resulting title would be empty.
@@ -159,15 +165,16 @@ struct QuickAdd: Equatable {
         return hour < 24 ? (hour, minute) : nil
     }
 
-    /// Fills gaps from the model; deterministic fields always win. Pure, so testable without the model.
-    func merging(_ f: QuickTaskFields, today: DateComponents) -> QuickAdd {
+    /// Fills gaps from the model when `text` has a cue word; deterministic fields always win. Pure, so testable without the model.
+    func merging(_ f: QuickTaskFields, text: String, today: DateComponents) -> QuickAdd {
         var result = self
+        let words = Set(text.lowercased().split { !$0.isLetter }.map(String.init))
         let title = f.title.trimmingCharacters(in: .whitespacesAndNewlines)
         if !title.isEmpty, title.lowercased() != "nil" { result.title = title }
-        if priority == 0, let p = f.priority {
+        if priority == 0, !words.isDisjoint(with: Self.priorityCues), let p = f.priority {
             result.priority = switch p { case .high: 1; case .medium: 5; case .low: 9 }
         }
-        if recurrence == .none, let r = f.recurrence {
+        if recurrence == .none, !words.isDisjoint(with: Self.recurrenceCues), let r = f.recurrence {
             result.recurrence = switch r {
             case .daily: .daily
             case .weekdays: .weekdays
@@ -192,7 +199,7 @@ struct QuickAdd: Equatable {
             """)
         // The deterministic title is already stripped of markers and dates (also avoids a "!high" guardrail false positive).
         guard let fields = try? await session.respond(to: plain.title, generating: QuickTaskFields.self).content else { return plain }
-        return plain.merging(fields, today: Calendar.current.dateComponents([.year, .month, .day], from: now))
+        return plain.merging(fields, text: text, today: Calendar.current.dateComponents([.year, .month, .day], from: now))
     }
 
     func apply(to reminder: EKReminder, lists: [EKCalendar]) {

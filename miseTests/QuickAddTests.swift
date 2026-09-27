@@ -69,12 +69,22 @@ struct QuickAddTests {
     @Test func mergingKeepsDeterministicFields() {
         let today = Self.day(9, 27)
         let marked = QuickAdd(title: "pay rent", priority: 1)
-            .merging(QuickTaskFields(title: " NIL ", priority: .low, recurrence: .monthly), today: today)
+            .merging(QuickTaskFields(title: " NIL ", priority: .low, recurrence: .monthly), text: "pay rent every month !high", today: today)
         #expect(marked == QuickAdd(title: "pay rent", due: today, recurrence: .monthly, priority: 1))
 
         let parsed = QuickAdd(title: "gym", due: Self.day(10, 1, 7), recurrence: .weekly)
-            .merging(QuickTaskFields(title: "Gym", priority: .high, recurrence: .daily), today: today)
+            .merging(QuickTaskFields(title: "Gym", priority: .high, recurrence: .daily), text: "urgent gym every wed 7am", today: today)
         #expect(parsed == QuickAdd(title: "Gym", due: Self.day(10, 1, 7), recurrence: .weekly, priority: 1))
+    }
+
+    @Test func mergingIgnoresUncuedModelFields() {
+        let today = Self.day(9, 27)
+        let fields = QuickTaskFields(title: "", priority: .high, recurrence: .daily)
+        #expect(QuickAdd(title: "buy milk").merging(fields, text: "buy milk #nosuchlist", today: today)
+            == QuickAdd(title: "buy milk"))
+        #expect(QuickAdd(title: "call mom").merging(fields, text: "urgent: call mom each morning", today: today)
+            == QuickAdd(title: "call mom", due: today, recurrence: .daily, priority: 1))
+        #expect(QuickAdd(title: "read everything").merging(fields, text: "read everything", today: today).recurrence == .none)
     }
 
     // Simulator can report available yet throw on every call; parseSmart must fall back either way.
