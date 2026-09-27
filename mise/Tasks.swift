@@ -338,7 +338,7 @@ struct TasksView: View {
     private func quickAddPrompts(_ view: some View) -> some View {
         view
             .confirmationDialog(Text(suggesting.map { "Did you mean \($0.list)?" } ?? ""),
-                                isPresented: Binding(get: { suggesting != nil }, set: { if !$0, let s = suggesting { suggesting = nil; openEditor(s.quick) } }),
+                                isPresented: Binding(get: { suggesting != nil }, set: { if !$0, let s = suggesting { suggesting = nil; creating = s.quick } }),
                                 titleVisibility: .visible, presenting: suggesting) { s in
                 Button("Use \(s.list)") {
                     var q = s.quick
@@ -346,7 +346,7 @@ struct TasksView: View {
                     suggesting = nil
                     openEditor(q)
                 }
-                Button("No") { suggesting = nil; creating = s.quick }
+                Button("No", role: .cancel) {}  // dismiss setter moves on to the create prompt
             }
             .alert(Text(creating.map { "Create list \"\($0.unknownList ?? "")\"?" } ?? ""),
                    isPresented: Binding(get: { creating != nil }, set: { if !$0, let q = creating { creating = nil; openEditor(q) } }),
@@ -355,7 +355,8 @@ struct TasksView: View {
                     creating = nil
                     var q = q
                     if let name = q.unknownList {
-                        do { q.listName = try store.newList(title: name).title } catch { errorMessage = error.localizedDescription }
+                        // ponytail: failure is silent (editor shows the default list); upgrade = open editor from the error alert's OK.
+                        q.listName = try? store.newList(title: name).title
                     }
                     openEditor(q)
                 }

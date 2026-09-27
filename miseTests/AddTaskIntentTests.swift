@@ -56,6 +56,19 @@ struct AddTaskIntentTests {
     }
 
     @Test(.enabled(if: EKEventStore.authorizationStatus(for: .reminder) == .fullAccess))
+    func unknownListFallsBackToCloseMatch() async throws {
+        let name = "misetest" + UUID().uuidString.prefix(8)
+        let list = try RemindersStore().newList(title: name)
+        defer { try? RemindersStore().deleteList(list) }
+        let id = UUID().uuidString
+        let (store, reminder) = try await add("mise intent test \(id) #\(name.dropLast())", id: id)
+        defer { try? store.eventStore.remove(reminder, commit: true) }
+
+        #expect(reminder.title == "mise intent test \(id)")
+        #expect(reminder.calendar?.calendarIdentifier == list.calendarIdentifier)
+    }
+
+    @Test(.enabled(if: EKEventStore.authorizationStatus(for: .reminder) == .fullAccess))
     func completeMarksReminderDone() async throws {
         let store = RemindersStore()
         let list = try store.newList(title: "mise-test-\(UUID().uuidString)")
