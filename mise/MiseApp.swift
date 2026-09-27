@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 #if os(iOS)
+import EventKit
 import WidgetKit
 #endif
 
@@ -46,11 +47,18 @@ struct MiseApp: App {
     #if os(iOS)
     // ponytail: spike write for #10/#11; replace with real widget snapshot later
     /// Spike #10: the widget shows these to prove App Group + shared keychain work.
+    /// Spike #11: asks for calendar access once so the widget can read EventKit.
     private static func recordSpikeLaunch() {
         let now = Date.now.formatted(date: .abbreviated, time: .standard)
         SharedStore.defaults?.set(now, forKey: "spike.lastLaunch")
         SharedStore.setSecret(now, for: "spike.lastLaunch")
         WidgetCenter.shared.reloadAllTimelines()
+        // Spike #11: the widget reads EventKit directly; the grant is per app.
+        guard EKEventStore.authorizationStatus(for: .event) == .notDetermined else { return }
+        Task {
+            _ = try? await EKEventStore().requestFullAccessToEvents()
+            WidgetCenter.shared.reloadAllTimelines()
+        }
     }
     #endif
 }

@@ -7,6 +7,8 @@
 		<key>NSExtensionPointIdentifier</key>
 		<string>com.apple.widgetkit-extension</string>
 	</dict>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>mise shows your calendar on Today and in widgets.</string>
 	<key>MiseAppGroup</key>
 	<string>group.$(MISE_BUNDLE_PREFIX).mise</string>
 	<key>MiseKeychainGroup</key>

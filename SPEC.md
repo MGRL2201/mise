@@ -464,6 +464,32 @@ To be filled in as capability spikes (Phase 1, Phase 9) complete.
   shared keychain group only for small secrets an extension needs. The
   EventKit-direct and keychain-snapshot fallbacks from §2.4 are not needed.
 
+### WidgetKit (Phase 1 spike, #11)
+
+- **Date / device:** 2026-09-27, iPhone 16 Pro Max, iOS 26.7, Xcode 27, free
+  Personal Team. Harness: the #10 widget `miseWidget/MiseWidget.swift`
+  (small + medium), `SpikeTapIntent`, calendar request in
+  `MiseApp.recordSpikeLaunch`.
+- **Provisioning:** `xcodebuild -allowProvisioningUpdates` succeeded, no
+  warnings. No new App ID: reuses #10's `<prefix>.mise.widget` profile.
+  Calendar access needs only `NSCalendarsFullAccessUsageDescription` (app
+  build setting + widget Info.plist), no entitlement.
+- **Verified automatically:** device build, macOS build, iOS Simulator suite
+  pass; install + launch on device; appex contains `Metadata.appintents`
+  (lists `SpikeTapIntent`) and the calendar usage key.
+- **Pending user checks** (Result: pending user confirmation):
+  1. Widget gallery lists "mise spike"; placed widget shows `Group:` and
+     `Keychain:` launch timestamps.
+  2. Tapping `Tap` increments `Taps: n` each time without opening the app.
+  3. After allowing calendar access in the app, the widget shows
+     `Today: <count>, next: <title>` (before: `EventKit: notDetermined`).
+- **Timeline:** `.after(+15 min)`; app reloads timelines on launch and after
+  the calendar grant.
+- **Proposed path (pending user checks above):** WidgetKit + App Group works
+  on the free account. Events widgets read EventKit directly in the extension
+  (`.event` full access verified in build only); no snapshot needed. Reminders
+  access for task widgets not tested — needs its own usage key and grant.
+
 ### Foundation Models (Phase 1 spike, #14)
 
 - **Date / machine:** 2026-09-27, MacBook Pro M3 Pro, macOS 26.6.2 (25G83),
