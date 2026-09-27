@@ -33,7 +33,7 @@ nonisolated enum SharedStore {
         var attributes = query(key)
         attributes[kSecValueData] = Data(value.utf8)
         // Widget may render before the user unlocks again.
-        attributes[kSecAttrAccessible] = kSecAttrAccessibleAfterFirstUnlock
+        attributes[kSecAttrAccessible] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         return SecItemAdd(attributes as CFDictionary, nil)
     }
 

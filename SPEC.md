@@ -48,8 +48,8 @@ Per Apple's capability table for free accounts:
 
 | Capability | Status |
 |---|---|
-| App Groups | Allowed per Apple's table — **VERIFY** (conflicting third-party reports) |
-| Keychain Sharing | Allowed per Apple's table — **VERIFY** |
+| App Groups | Works on free account (verified on device, #10 — §12) |
+| Keychain Sharing | Works on free account (verified on device, #10 — §12) |
 | iCloud / CloudKit | Not allowed |
 | Push notifications | Not allowed |
 | Siri (legacy SiriKit) | Not allowed |
@@ -435,6 +435,34 @@ See `README.md` for the branch model (`main`, `develop`, `feature/<issue#>-<slug
 ## 12. Spike results
 
 To be filled in as capability spikes (Phase 1, Phase 9) complete.
+
+### App Groups and Keychain Sharing (Phase 1 spike, #10)
+
+- **Date / device:** 2026-09-27, iPhone 16 Pro Max, iOS 26.7, Xcode 27, free
+  Personal Team. Harness: iOS-only WidgetKit extension `miseWidget`,
+  `Shared/SharedStore.swift`, `miseTests/SharedStoreTests.swift`.
+- **Provisioning:** `xcodebuild -allowProvisioningUpdates` succeeded, no
+  warnings. The free account silently registered the widget App ID
+  `<prefix>.mise.widget` and the app group; profiles expire after 7 days.
+  `embedded.mobileprovision` grants `application-groups`
+  `[group.<prefix>.mise]` and `keychain-access-groups` `[<TEAM>.*]`;
+  `codesign -d --entitlements -` shows both entitlements on app and appex.
+- **Runtime:** `SharedStoreTests` 3/3 pass on device (group container exists,
+  group defaults round-trip, shared keychain round-trip). After launch,
+  `devicectl device copy from --domain-type appGroupDataContainer` showed
+  `spike.lastLaunch` in the group prefs plist.
+- **Widget-side read:** pending user check — the "mise spike" widget should
+  show `Group: <launch timestamp>` and `Keychain: <same timestamp>`.
+- **Gotcha:** the first `keychain-access-groups` entry is the default group
+  for new items. Listing only the shared group moved every new item
+  (including the stock API key from `Keychain.swift`) into the
+  widget-readable group. Keep the app-private group
+  `$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)` first;
+  `KeychainTests.setUsesAppPrivateGroupNotSharedGroup` guards it.
+- **App IDs used:** 1 (widget, reused by #11).
+- **Chosen path:** App Group container/defaults for app↔extension data; the
+  shared keychain group only for small secrets an extension needs. The
+  EventKit-direct and keychain-snapshot fallbacks from §2.4 are not needed.
 
 ### Foundation Models (Phase 1 spike, #14)
 

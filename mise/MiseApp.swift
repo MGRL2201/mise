@@ -44,6 +44,7 @@ struct MiseApp: App {
     }
 
     #if os(iOS)
+    // ponytail: spike write for #10/#11; replace with real widget snapshot later
     /// Spike #10: the widget shows these to prove App Group + shared keychain work.
     private static func recordSpikeLaunch() {
         let now = Date.now.formatted(date: .abbreviated, time: .standard)
