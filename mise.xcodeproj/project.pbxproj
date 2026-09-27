@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		A10000000000000000000049 /* miseWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A10000000000000000000040 /* miseWidget.appex */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A10000000000000000000058 /* miseShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A10000000000000000000050 /* miseShare.appex */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -25,6 +26,13 @@
 			remoteGlobalIDString = A10000000000000000000043;
 			remoteInfo = miseWidget;
 		};
+		A10000000000000000000056 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A10000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A10000000000000000000052;
+			remoteInfo = miseShare;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -35,6 +43,7 @@
 			dstSubfolderSpec = 13;
 			files = (
 				A10000000000000000000049 /* miseWidget.appex in Embed Foundation Extensions */,
+				A10000000000000000000058 /* miseShare.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -46,6 +55,7 @@
 		A10000000000000000000006 /* miseTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = miseTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000009 /* Signing.shared.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.shared.xcconfig; sourceTree = "<group>"; };
 		A10000000000000000000040 /* miseWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = miseWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000000000000000000050 /* miseShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = miseShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -67,6 +77,11 @@
 		A10000000000000000000042 /* Shared */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = Shared;
+			sourceTree = "<group>";
+		};
+		A10000000000000000000051 /* miseShare */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = miseShare;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -93,6 +108,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A10000000000000000000054 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -103,6 +125,7 @@
 				A10000000000000000000007 /* mise */,
 				A10000000000000000000008 /* miseTests */,
 				A10000000000000000000041 /* miseWidget */,
+				A10000000000000000000051 /* miseShare */,
 				A10000000000000000000042 /* Shared */,
 				A10000000000000000000003 /* Products */,
 			);
@@ -114,6 +137,7 @@
 				A10000000000000000000005 /* mise.app */,
 				A10000000000000000000006 /* miseTests.xctest */,
 				A10000000000000000000040 /* miseWidget.appex */,
+				A10000000000000000000050 /* miseShare.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -142,6 +166,7 @@
 			);
 			dependencies = (
 				A10000000000000000000048 /* PBXTargetDependency */,
+				A10000000000000000000057 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				A10000000000000000000007 /* mise */,
@@ -194,6 +219,27 @@
 			productReference = A10000000000000000000040 /* miseWidget.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		A10000000000000000000052 /* miseShare */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A10000000000000000000059 /* Build configuration list for PBXNativeTarget "miseShare" */;
+			buildPhases = (
+				A10000000000000000000053 /* Sources */,
+				A10000000000000000000054 /* Frameworks */,
+				A10000000000000000000055 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A10000000000000000000051 /* miseShare */,
+				A10000000000000000000042 /* Shared */,
+			);
+			name = miseShare;
+			productName = miseShare;
+			productReference = A10000000000000000000050 /* miseShare.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -212,6 +258,9 @@
 						TestTargetID = A10000000000000000000010;
 					};
 					A10000000000000000000043 = {
+						CreatedOnToolsVersion = 26.0;
+					};
+					A10000000000000000000052 = {
 						CreatedOnToolsVersion = 26.0;
 					};
 				};
@@ -233,6 +282,7 @@
 				A10000000000000000000010 /* mise */,
 				A10000000000000000000015 /* miseTests */,
 				A10000000000000000000043 /* miseWidget */,
+				A10000000000000000000052 /* miseShare */,
 			);
 		};
 /* End PBXProject section */
@@ -253,6 +303,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		A10000000000000000000018 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10000000000000000000055 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -283,6 +340,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A10000000000000000000053 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -296,6 +360,12 @@
 			isa = PBXTargetDependency;
 			target = A10000000000000000000010 /* mise */;
 			targetProxy = A10000000000000000000014 /* PBXContainerItemProxy */;
+		};
+		A10000000000000000000057 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			platformFilter = ios;
+			target = A10000000000000000000052 /* miseShare */;
+			targetProxy = A10000000000000000000056 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -437,6 +507,9 @@
 				INFOPLIST_FILE = Config/Info.plist;
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "mise shows your calendar on Today and in widgets.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Unlock mise with Face ID.";
+				"INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace[sdk=iphoneos*]" = NO;
+				"INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace[sdk=iphonesimulator*]" = NO;
+				"INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace[sdk=macosx*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -481,6 +554,9 @@
 				INFOPLIST_FILE = Config/Info.plist;
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "mise shows your calendar on Today and in widgets.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Unlock mise with Face ID.";
+				"INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace[sdk=iphoneos*]" = NO;
+				"INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace[sdk=iphonesimulator*]" = NO;
+				"INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace[sdk=macosx*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -614,6 +690,68 @@
 			};
 			name = Release;
 		};
+		A1000000000000000000005A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Config/miseShare.entitlements;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Config/miseShare-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = mise;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(MISE_BUNDLE_PREFIX).mise.share";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		A1000000000000000000005B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Config/miseShare.entitlements;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Config/miseShare-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = mise;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(MISE_BUNDLE_PREFIX).mise.share";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -649,6 +787,15 @@
 			buildConfigurations = (
 				A1000000000000000000004C /* Debug */,
 				A1000000000000000000004D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A10000000000000000000059 /* Build configuration list for PBXNativeTarget "miseShare" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1000000000000000000005A /* Debug */,
+				A1000000000000000000005B /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

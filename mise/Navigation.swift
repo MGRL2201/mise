@@ -101,6 +101,7 @@ struct ContentView: View {
             }
         }
         .onOpenURL { url in
+            if url.isFileURL { return SharedInbox.importOpened(url) }
             guard let route = Route(url: url) else { return }
             macSelection = route.destination
         }
@@ -134,6 +135,7 @@ struct ContentView: View {
             }
         }
         .onOpenURL { url in
+            if url.isFileURL { return SharedInbox.importOpened(url) }
             guard let route = Route(url: url) else { return }
             select(route.destination)
         }

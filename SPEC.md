@@ -522,6 +522,45 @@ To be filled in as capability spikes (Phase 1, Phase 9) complete.
   for Siri/Shortcuts; no extension needed. Real add writes to Reminders via
   EventKit (§6.2) in the Tasks phase.
 
+### Share Extension (Phase 1 spike, #13)
+
+- **Date / device:** 2026-09-27, iPhone 16 Pro Max, iOS 26.7, Xcode 27, free
+  Personal Team. Harness: iOS-only share extension `miseShare`
+  (`miseShare/ShareViewController.swift`, no UI), `Shared/SharedInbox.swift`
+  (copies to `<App Group container>/Inbox/<uuid>-<name>`), document types in
+  `Config/Info.plist` routed through `ContentView.onOpenURL`,
+  `miseTests/SharedInboxTests.swift`, Settings → "Spike: shared inbox" row.
+- **Provisioning:** `xcodebuild -allowProvisioningUpdates` succeeded, no
+  warnings. The free account silently registered a new App ID
+  `<prefix>.mise.share` ("iOS Team Provisioning Profile:
+  <prefix>.mise.share"). `codesign -d --entitlements` on the appex shows
+  `application-groups` `[group.<prefix>.mise]`. **New App IDs this week:** 2
+  (widget #10, share #13), besides the app's own.
+- **Verified automatically:** device build, iOS Simulator suite (38/38) and
+  macOS build pass; `SharedInboxTests` passes on device; install + launch on
+  device. Appex Info.plist has `com.apple.share-services`, principal class
+  `miseShare.ShareViewController`, activation rule file/image max 1, display
+  name "mise". App Info.plist has `CFBundleDocumentTypes` (`com.adobe.pdf`,
+  `public.image`, Viewer, Alternate).
+- **Not automated:** `devicectl device process launch --payload-url
+  file://…` (2 tries) put nothing in the Inbox and printed nothing; the
+  payload doesn't seem to reach `onOpenURL`. Left to the manual check.
+- **Gotcha:** `LSSupportsOpeningDocumentsInPlace = NO` fails the macOS build
+  ("not supported on macOS"), and leaving it out with document types present
+  counts as NO. Set per SDK: NO on iOS (system copies the file in), YES on
+  macOS (build settings `INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace[sdk=…]`).
+- **Pending user checks** (Result: pending user confirmation):
+  1. Files → any PDF → Share → "mise" in the share sheet (may need "More" /
+     Edit Actions) → tap → sheet closes. Open mise → Settings → "Spike:
+     shared inbox" shows `Files 1` and the filename (`<uuid>-<name>.pdf`).
+     Re-open Settings if the count looks stale.
+  2. Mail → PDF attachment → Share → mise → same check, count +1.
+  3. Fallback: Files → PDF → Share → mise app icon ("Open in mise"; or
+     long-press → Share → app row) → mise opens; Settings inbox count +1.
+- **Proposed path (pending user checks above):** share extension + App Group
+  inbox as the primary way in; document types kept as the fallback (and the
+  macOS route). The Finance importer reads `SharedInbox` later.
+
 ### Foundation Models (Phase 1 spike, #14)
 
 - **Date / machine:** 2026-09-27, MacBook Pro M3 Pro, macOS 26.6.2 (25G83),

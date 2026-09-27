@@ -92,6 +92,16 @@ struct SettingsView: View {
             }
             .listRowBackground(Color(theme.surface))
 
+            #if os(iOS)
+            // ponytail: spike row, replaced by Finance import later
+            Section("Spike: shared inbox") {
+                let inbox = SharedInbox.files
+                LabeledContent("Files", value: "\(inbox.count)")
+                Text(inbox.first?.lastPathComponent ?? "Empty").foregroundStyle(.secondary)
+            }
+            .listRowBackground(Color(theme.surface))
+            #endif
+
             Section {
                 Button("Export backup…") {
                     do {
