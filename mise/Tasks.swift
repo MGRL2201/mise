@@ -8,7 +8,7 @@ import UIKit
 /// set EKReminder properties (title, notes, priority, dueDateComponents,
 /// recurrenceRules, alarms, calendar) directly, then `save`.
 @Observable final class RemindersStore {
-    let eventStore = EKEventStore()
+    let eventStore: EKEventStore
     var status: EKAuthorizationStatus
     var reminders: [EKReminder] = []
     var lists: [EKCalendar] = []
@@ -16,7 +16,8 @@ import UIKit
 
     var hasAccess: Bool { status == .fullAccess }
 
-    init() {
+    init(eventStore: EKEventStore = EKEventStore()) {
+        self.eventStore = eventStore
         status = EKEventStore.authorizationStatus(for: .reminder)
         let store = eventStore
         Task { [weak self] in
@@ -183,7 +184,9 @@ struct TasksView: View {
             } description: {
                 Text("mise needs full access to Reminders. Enable it in Settings.")
             } actions: {
-                Button("Open Settings") { openSettings() }
+                Button("Open Settings") {
+                    if let url = privacySettingsURL(macAnchor: "Privacy_Reminders") { openURL(url) }
+                }
             }
         }
     }
@@ -238,16 +241,13 @@ struct TasksView: View {
             errorMessage = error.localizedDescription
         }
     }
+}
 
-    private func openSettings() {
-        #if os(macOS)
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Reminders") {
-            openURL(url)
-        }
-        #else
-        if let url = URL(string: UIApplication.openSettingsURLString) {
-            openURL(url)
-        }
-        #endif
-    }
+/// App settings on iOS; the given Privacy pane (e.g. "Privacy_Calendars") on macOS.
+func privacySettingsURL(macAnchor: String) -> URL? {
+    #if os(macOS)
+    URL(string: "x-apple.systempreferences:com.apple.preference.security?\(macAnchor)")
+    #else
+    URL(string: UIApplication.openSettingsURLString)
+    #endif
 }
