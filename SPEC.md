@@ -470,8 +470,16 @@ To be filled in as capability spikes (Phase 1, Phase 9) complete.
   `.available`, but all 10 calls threw `LanguageModelError -1` wrapping
   `ModelManagerError 1026` (0/10; ~170 ms to fail, 2124 ms first call).
   Likely the iOS 27 simulator runtime vs the macOS 26.6 host model; unverified.
-- **iPhone 16 Pro Max latency: not measured — no device connected yet; re-run
-  with MISE_FM_SPIKE on device.**
+- **iPhone 16 Pro Max (iOS 26.7, 23H24), 2 runs on device** (Personal Team
+  build, `TEST_RUNNER_MISE_FM_SPIKE=1 xcodebuild test -destination
+  'platform=iOS,id=<udid>' -only-testing:miseTests/FoundationModelsSpikeTests`):
+  availability `.available`, all 20 calls succeeded (no guardrail hit on #4,
+  unlike the Mac). Run 1: kind 10/10, all fields 9/10, median 858 ms, max
+  2769 ms (first call, cold). Run 2: kind 9/10, all fields 8/10, median
+  863 ms, max 1310 ms. Warm calls 620–1310 ms — same as the Mac. Misses: #9
+  merchant kept raw ("Trader Joe's #123"), run 2 picked SUBTOTAL 41.17 over
+  TOTAL 44.46; run 2 classified #5 (garden ideas) as a task. Same invented
+  due dates and "next Tuesday" off-by-one (09-29 / 09-30) as on the Mac.
 - **Failure modes:** kind flips between runs on the same input (task↔note for
   #2 and #7); relative weekdays resolved wrong ("next Tuesday" → Wed/Fri);
   currency and due invented (CNY/SGD from locale, due copied onto expenses);
