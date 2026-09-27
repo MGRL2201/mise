@@ -21,5 +21,9 @@
 			</array>
 		</dict>
 	</array>
+	<key>MiseAppGroup</key>
+	<string>group.$(MISE_BUNDLE_PREFIX).mise</string>
+	<key>MiseKeychainGroup</key>
+	<string>$(AppIdentifierPrefix)$(MISE_BUNDLE_PREFIX).mise.shared</string>
 </dict>
 </plist>

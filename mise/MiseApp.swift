@@ -1,5 +1,8 @@
 import SwiftUI
 import SwiftData
+#if os(iOS)
+import WidgetKit
+#endif
 
 @main
 struct MiseApp: App {
@@ -17,7 +20,11 @@ struct MiseApp: App {
                 .environment(appLock)
                 .onChange(of: phase, initial: true) { _, phase in
                     switch phase {
-                    case .active: AutoBackup.run(context: container.mainContext)
+                    case .active:
+                        AutoBackup.run(context: container.mainContext)
+                        #if os(iOS)
+                        Self.recordSpikeLaunch()
+                        #endif
                     #if os(iOS)
                     case .background: AutoBackup.scheduleRefresh()
                     #endif
@@ -35,4 +42,15 @@ struct MiseApp: App {
         }
         #endif
     }
+
+    #if os(iOS)
+    // ponytail: spike write for #10/#11; replace with real widget snapshot later
+    /// Spike #10: the widget shows these to prove App Group + shared keychain work.
+    private static func recordSpikeLaunch() {
+        let now = Date.now.formatted(date: .abbreviated, time: .standard)
+        SharedStore.defaults?.set(now, forKey: "spike.lastLaunch")
+        SharedStore.setSecret(now, for: "spike.lastLaunch")
+        WidgetCenter.shared.reloadAllTimelines()
+    }
+    #endif
 }
