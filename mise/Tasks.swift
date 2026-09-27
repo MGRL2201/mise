@@ -195,11 +195,23 @@ struct TasksView: View {
     @Environment(\.openURL) private var openURL
     @State private var errorMessage: String?
     @State private var mode = TaskViewMode.today
+    @State private var editing: EditingReminder?
+
+    private struct EditingReminder: Identifiable {
+        let reminder: EKReminder
+        var id: String { reminder.calendarItemIdentifier }
+    }
 
     var body: some View {
         content
             .navigationTitle("Tasks")
             .themedBackground()
+            .toolbar {
+                if store.hasAccess {
+                    Button("New Task", systemImage: "plus") { editing = EditingReminder(reminder: store.newReminder()) }
+                }
+            }
+            .sheet(item: $editing) { TaskEditor(reminder: $0.reminder) }
             .task { await store.refresh() }
             // ponytail: day rollover only; timed reminders passing their due time mid-day don't turn red until the next re-render.
             .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in Task { await store.refresh() } }
@@ -311,14 +323,21 @@ struct TasksView: View {
                 Image(systemName: reminder.isCompleted ? "checkmark.circle.fill" : "circle")
             }
             .buttonStyle(.plain)
-            VStack(alignment: .leading) {
-                Text(reminder.title ?? "").strikethrough(reminder.isCompleted)
-                if let date = reminder.dueDate {
-                    let overdue = !reminder.isCompleted
-                        && TaskGrouping.dueBucket(reminder.dueDateComponents, now: .now, calendar: .current) == .overdue
-                    Text(date, style: .date).font(.caption).foregroundStyle(overdue ? Color.red : .secondary)
+            Button {
+                editing = EditingReminder(reminder: reminder)
+            } label: {
+                VStack(alignment: .leading) {
+                    Text(reminder.title ?? "").strikethrough(reminder.isCompleted)
+                    if let date = reminder.dueDate {
+                        let overdue = !reminder.isCompleted
+                            && TaskGrouping.dueBucket(reminder.dueDateComponents, now: .now, calendar: .current) == .overdue
+                        Text(date, style: .date).font(.caption).foregroundStyle(overdue ? Color.red : .secondary)
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
         }
         .swipeActions {
             Button("Delete", role: .destructive) {
