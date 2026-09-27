@@ -1,4 +1,5 @@
 import SwiftUI
+import AppIntents
 import SwiftData
 import EventKit
 #if os(iOS)
@@ -15,7 +16,9 @@ struct MiseApp: App {
     @Environment(\.scenePhase) private var phase
 
     init() {
-        container = Storage.makeContainer()
+        let container = Storage.makeContainer()
+        self.container = container
+        AppDependencyManager.shared.add(dependency: container)  // CompleteTaskIntent
         let store = EKEventStore()  // one store per app (Apple guidance)
         _reminders = State(initialValue: RemindersStore(eventStore: store, context: container.mainContext))
         _calendar = State(initialValue: CalendarStore(eventStore: store))

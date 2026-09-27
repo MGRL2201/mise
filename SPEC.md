@@ -501,7 +501,7 @@ To be filled in as capability spikes (Phase 1, Phase 9) complete.
   Personal Team. Harness: `mise/AddTaskIntent.swift` (`AddTaskIntent` +
   `MiseShortcuts` provider) in the main app target,
   `miseTests/AddTaskIntentTests.swift`. Spike store: `UserDefaults.standard`
-  key `spike.siriTasks`.
+  key `spike.siriTasks` (replaced by Reminders in #22).
 - **Provisioning:** `xcodebuild -allowProvisioningUpdates` succeeded with the
   existing `<prefix>.mise` profile. No new App ID, no Siri entitlement;
   `codesign -d --entitlements` on the app shows only the #10 entitlements.
@@ -523,8 +523,10 @@ To be filled in as capability spikes (Phase 1, Phase 9) complete.
      milk" → Siri replies "Added buy milk to mise."
   3. Optional: tap the "Add Task" tile in Shortcuts, enter a title, same reply.
 - **Proposed path (pending user checks above):** App Intents in the main app
-  for Siri/Shortcuts; no extension needed. Real add writes to Reminders via
-  EventKit (§6.2) in the Tasks phase.
+  for Siri/Shortcuts; no extension needed.
+- **#22:** `AddTaskIntent` now writes to Reminders via EventKit (§6.2), title
+  run through quick-add parsing; the spike `UserDefaults` store is gone.
+  `CompleteTaskIntent` (not discoverable) completes a reminder by ID.
 
 ### Share Extension (Phase 1 spike, #13)
 
