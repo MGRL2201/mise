@@ -67,6 +67,9 @@ struct CalendarStoreTests {
             }
         }
         let editedTitle = "mise test event edited externally"
+        let before = try #require(occurrences().first)
+        let changed = Flag()
+        withObservationTracking { _ = store.events } onChange: { changed.fired = true }
         try await pollUntil(timeout: 5) {
             guard let external = externalFirst() else { return false }
             external.title = editedTitle
@@ -74,6 +77,10 @@ struct CalendarStoreTests {
             return true
         }
         try await pollUntil(timeout: 5) { occurrences().first?.title == editedTitle }
+        let after = try #require(occurrences().first)
+        print("#126 diag event: === \(after === before), == \(after == before)")
+        // #126: SwiftUI only re-renders if observers are notified.
+        try await pollUntil(timeout: 5) { changed.fired }
 
         // .futureEvents from the first occurrence also takes the split-off
         // series with it, so nothing is left.
@@ -92,3 +99,6 @@ struct CalendarStoreTests {
         Issue.record("condition did not become true within \(timeout)s")
     }
 }
+
+/// Sendable box for `withObservationTracking`'s onChange flag.
+final class Flag: @unchecked Sendable { var fired = false }

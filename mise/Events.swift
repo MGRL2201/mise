@@ -43,7 +43,13 @@ import SwiftUI
         }
         // Every account source (iCloud, Exchange/Outlook, local, subscribed).
         calendars = eventStore.calendars(for: .event)
-        events = events(in: range)
+        reloadEvents()
+    }
+
+    // Refetched EKEvents are == the old ones (isEqual) even after an external
+    // edit, so a plain assignment skips @Observable's notify; force it (#126).
+    private func reloadEvents() {
+        withMutation(keyPath: \.events) { events = events(in: range) }
     }
 
     func events(in interval: DateInterval) -> [EKEvent] {
@@ -69,12 +75,12 @@ import SwiftUI
             event.rollback()
             throw error
         }
-        events = events(in: range)
+        reloadEvents()
     }
 
     func delete(_ event: EKEvent, span: EKSpan = .thisEvent) throws {
         try eventStore.remove(event, span: span, commit: true)
-        events = events(in: range)
+        reloadEvents()
     }
 }
 
@@ -105,7 +111,7 @@ struct CalendarView: View {
             if store.events.isEmpty {
                 ContentUnavailableView("No Upcoming Events", systemImage: "calendar")
             } else {
-                List(store.events, id: \.self) { event in
+                List(store.events, id: \.rowID) { event in
                     row(for: event)
                 }
                 .refreshable { await store.refresh() }
@@ -142,4 +148,9 @@ struct CalendarView: View {
             }
         }
     }
+}
+
+private extension EKEvent {
+    // Recurring occurrences share eventIdentifier; startDate tells them apart.
+    var rowID: String { "\(eventIdentifier ?? "")|\(startDate.timeIntervalSinceReferenceDate)" }
 }
