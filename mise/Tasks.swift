@@ -219,7 +219,7 @@ enum TaskGrouping {
 }
 
 enum TaskViewMode: String, CaseIterable {
-    case today = "Today", upcoming = "Upcoming", lists = "Lists", priority = "Priority", completed = "Completed"
+    case today = "Today", upcoming = "Upcoming", lists = "Lists", priority = "Priority", completed = "Done"
 
     var emptyTitle: String {
         switch self {

@@ -108,7 +108,7 @@ struct ContentView: View {
         #else
         TabView(selection: $tab) {
             Tab("Today", systemImage: Destination.today.systemImage, value: .today) {
-                NavigationStack { PlaceholderView(destination: .today) }
+                NavigationStack { detailView(for: .today) }
             }
             Tab("Tasks", systemImage: Destination.tasks.systemImage, value: .tasks) {
                 NavigationStack { detailView(for: .tasks) }
@@ -128,6 +128,7 @@ struct ContentView: View {
                     }
                     .navigationTitle("More")
                     .themedBackground()
+                    .toolbarTitleDisplayMode(.inlineLarge)
                     .navigationDestination(for: Destination.self) { destination in
                         detailView(for: destination)
                     }
@@ -142,20 +143,25 @@ struct ContentView: View {
         #endif
     }
 
-    @ViewBuilder
     private func detailView(for destination: Destination) -> some View {
-        if destination == .settings {
-            SettingsView()
-        } else if destination == .tasks {
-            TasksView()
-        } else if destination == .calendar {
-            CalendarView()
-        } else if destination == .money && lock.mode == .financeAndNotes && !lock.isUnlocked {
-            // ponytail: Notes isn't gated; per-note lock (Phase 5, SPEC §6.5) will reuse AppLock.isUnlocked.
-            LockView()
-        } else {
-            PlaceholderView(destination: destination)
+        Group {
+            if destination == .settings {
+                SettingsView()
+            } else if destination == .tasks {
+                TasksView()
+            } else if destination == .calendar {
+                CalendarView()
+            } else if destination == .money && lock.mode == .financeAndNotes && !lock.isUnlocked {
+                // ponytail: Notes isn't gated; per-note lock (Phase 5, SPEC §6.5) will reuse AppLock.isUnlocked.
+                LockView()
+            } else {
+                PlaceholderView(destination: destination)
+            }
         }
+        #if !os(macOS)
+        // Title shares the toolbar row instead of sitting below an empty band (#131).
+        .toolbarTitleDisplayMode(.inlineLarge)
+        #endif
     }
 
     #if !os(macOS)
