@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 @preconcurrency import EventKit
 #if !os(macOS)
 import UIKit
@@ -13,11 +14,14 @@ import UIKit
     var reminders: [EKReminder] = []
     var lists: [EKCalendar] = []
     private var refreshGeneration = 0
+    /// SwiftData context for TaskExtras cleanup after each refresh; nil skips it.
+    private let context: ModelContext?
 
     var hasAccess: Bool { status == .fullAccess }
 
-    init(eventStore: EKEventStore = EKEventStore()) {
+    init(eventStore: EKEventStore = EKEventStore(), context: ModelContext? = nil) {
         self.eventStore = eventStore
+        self.context = context
         status = EKEventStore.authorizationStatus(for: .reminder)
         let store = eventStore
         Task { [weak self] in
@@ -55,6 +59,13 @@ import UIKit
             case (.none, .some): return false
             default: return (lhs.title ?? "") < (rhs.title ?? "")
             }
+        }
+        guard let context else { return }
+        let store = eventStore
+        // Best-effort orphan cleanup; `exists` covers reminders outside the fetch window.
+        try? TaskExtras.reconcile(context, reminders: reminders.map { ($0.calendarItemIdentifier, $0.calendarItemExternalIdentifier) }) {
+            store.calendarItem(withIdentifier: $0.reminderID) != nil
+                || ($0.externalID.map { !$0.isEmpty && !store.calendarItems(withExternalIdentifier: $0).isEmpty } ?? false)
         }
     }
 
@@ -196,6 +207,9 @@ struct TasksView: View {
     @State private var errorMessage: String?
     @State private var mode = TaskViewMode.today
     @State private var editing: EditingReminder?
+    @State private var filterTag: String?
+    @Query(sort: \Tag.name) private var tags: [Tag]
+    @Query private var extras: [TaskExtras]
 
     private struct EditingReminder: Identifiable {
         let reminder: EKReminder
@@ -207,6 +221,14 @@ struct TasksView: View {
             .navigationTitle("Tasks")
             .themedBackground()
             .toolbar {
+                if store.hasAccess && !tags.isEmpty {
+                    Menu("Tag", systemImage: activeTag == nil ? "tag" : "tag.fill") {
+                        Picker("Tag", selection: $filterTag) {
+                            Text("All Tags").tag(String?.none)
+                            ForEach(tags.map(\.name), id: \.self) { Text($0).tag(Optional($0)) }
+                        }
+                    }
+                }
                 if store.hasAccess {
                     Button("New Task", systemImage: "plus") { editing = EditingReminder(reminder: store.newReminder()) }
                 }
@@ -264,6 +286,12 @@ struct TasksView: View {
         }
     }
 
+    /// The filter tag, if it still exists: a tag removed elsewhere (restore) stops
+    /// filtering instead of hiding everything.
+    private var activeTag: String? {
+        filterTag.flatMap { name in tags.contains { $0.name == name } ? name : nil }
+    }
+
     private var sections: [(title: String, items: [EKReminder])] {
         let calendar = Calendar.current
         let now = Date.now
@@ -293,14 +321,19 @@ struct TasksView: View {
                 .reversed()
                 .map { (dayTitle($0.day), $0.items) }
         }
-        return result.filter { !$0.items.isEmpty }
+        guard let activeTag else { return result.filter { !$0.items.isEmpty } }
+        let tagged = { (r: EKReminder) in
+            TaskExtras.match(extras, id: r.calendarItemIdentifier, externalID: r.calendarItemExternalIdentifier)?
+                .tags?.contains { $0.name == activeTag } ?? false
+        }
+        return result.map { ($0.title, $0.items.filter(tagged)) }.filter { !$0.items.isEmpty }
     }
 
     @ViewBuilder
     private var remindersList: some View {
         let sections = sections
         if sections.isEmpty {
-            ContentUnavailableView(mode.emptyTitle, systemImage: "checklist")
+            ContentUnavailableView(activeTag.map { "No Tasks Tagged \($0)" } ?? mode.emptyTitle, systemImage: "checklist")
         } else {
             List {
                 ForEach(sections.indices, id: \.self) { index in
