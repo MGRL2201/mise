@@ -70,11 +70,10 @@ import UIKit
 
     private func fetchAllReminders() async -> [EKReminder] {
         let store = eventStore
-        // ponytail: 7-day completed window keeps a just-checked row visible;
-        // the full completed log (#17) needs its own fetch.
-        let weekAgo = Date().addingTimeInterval(-7 * 24 * 60 * 60)
+        // ponytail: completed log shows the last 30 days; longer history needs a paged fetch.
+        let monthAgo = Date().addingTimeInterval(-30 * 24 * 60 * 60)
         return await fetch(store.predicateForIncompleteReminders(withDueDateStarting: nil, ending: nil, calendars: nil))
-            + fetch(store.predicateForCompletedReminders(withCompletionDateStarting: weekAgo, ending: nil, calendars: nil))
+            + fetch(store.predicateForCompletedReminders(withCompletionDateStarting: monthAgo, ending: nil, calendars: nil))
     }
 
     func newReminder(in list: EKCalendar? = nil) -> EKReminder {
@@ -140,16 +139,70 @@ extension EKReminder {
     }
 }
 
+/// Pure grouping rules for the task views; no EventKit.
+enum TaskGrouping {
+    enum DueBucket { case overdue, today, upcoming }
+    enum Priority: String, CaseIterable { case high = "High", medium = "Medium", low = "Low", none = "None" }
+
+    /// nil = no due date or beyond today+7. Timed reminders go overdue at their
+    /// time; all-day ones only once their day has passed.
+    static func dueBucket(_ due: DateComponents?, now: Date, calendar: Calendar) -> DueBucket? {
+        guard let due, let date = calendar.date(from: due) else { return nil }
+        let today = calendar.startOfDay(for: now)
+        let day = calendar.startOfDay(for: date)
+        if due.hour != nil ? date < now : day < today { return .overdue }
+        switch calendar.dateComponents([.day], from: today, to: day).day ?? 0 {
+        case 0: return .today
+        case 1...7: return .upcoming
+        default: return nil
+        }
+    }
+
+    /// Groups by start of day, ascending; items without a date are dropped.
+    static func dayGroups<T>(_ items: [T], calendar: Calendar, date: (T) -> Date?) -> [(day: Date, items: [T])] {
+        let dated = items.compactMap { item in date(item).map { (calendar.startOfDay(for: $0), item) } }
+        return Dictionary(grouping: dated, by: \.0)
+            .map { (day: $0.key, items: $0.value.map(\.1)) }
+            .sorted { $0.day < $1.day }
+    }
+
+    /// EventKit priority: 1-4 high, 5 medium, 6-9 low, 0 none.
+    static func priorityBucket(_ priority: Int) -> Priority {
+        switch priority {
+        case 1...4: .high
+        case 5: .medium
+        case 6...9: .low
+        default: .none
+        }
+    }
+}
+
+enum TaskViewMode: String, CaseIterable {
+    case today = "Today", upcoming = "Upcoming", lists = "Lists", priority = "Priority", completed = "Completed"
+
+    var emptyTitle: String {
+        switch self {
+        case .today: "Nothing Due Today"
+        case .upcoming: "Nothing Upcoming"
+        case .lists, .priority: "No Open Reminders"
+        case .completed: "No Completed Reminders"
+        }
+    }
+}
+
 struct TasksView: View {
     @Environment(RemindersStore.self) private var store
     @Environment(\.openURL) private var openURL
     @State private var errorMessage: String?
+    @State private var mode = TaskViewMode.today
 
     var body: some View {
         content
             .navigationTitle("Tasks")
             .themedBackground()
             .task { await store.refresh() }
+            // ponytail: day rollover only; timed reminders passing their due time mid-day don't turn red until the next re-render.
+            .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in Task { await store.refresh() } }
             .alert(
                 "Couldn't update reminder",
                 isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } }),
@@ -177,6 +230,14 @@ struct TasksView: View {
                 ContentUnavailableView("No Reminders", systemImage: "checklist")
             } else {
                 remindersList
+                    .safeAreaInset(edge: .top) {
+                        Picker("View", selection: $mode) {
+                            ForEach(TaskViewMode.allCases, id: \.self) { Text($0.rawValue) }
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .padding(.horizontal)
+                    }
             }
         default:
             ContentUnavailableView {
@@ -191,20 +252,55 @@ struct TasksView: View {
         }
     }
 
+    private var sections: [(title: String, items: [EKReminder])] {
+        let calendar = Calendar.current
+        let now = Date.now
+        // Open views keep today's completions so a just-checked row can be unchecked.
+        let open = store.reminders.filter { !$0.isCompleted || $0.completionDate.map(calendar.isDateInToday) == true }
+        let bucket = { (r: EKReminder) in TaskGrouping.dueBucket(r.dueDateComponents, now: now, calendar: calendar) }
+        let dayTitle = { (day: Date) in day.formatted(.dateTime.weekday(.wide).month().day()) }
+        let result: [(title: String, items: [EKReminder])]
+        switch mode {
+        case .today:
+            result = [("Overdue", open.filter { bucket($0) == .overdue }), ("Today", open.filter { bucket($0) == .today })]
+        case .upcoming:
+            result = TaskGrouping.dayGroups(open.filter { bucket($0) == .upcoming }, calendar: calendar) { $0.dueDate }
+                .map { (dayTitle($0.day), $0.items) }
+        case .lists:
+            result = store.lists.map { list in
+                (list.title, open.filter { $0.calendar?.calendarIdentifier == list.calendarIdentifier })
+            }
+        case .priority:
+            result = TaskGrouping.Priority.allCases.map { p in
+                (p.rawValue, open.filter { TaskGrouping.priorityBucket($0.priority) == p })
+            }
+        case .completed:
+            let completed = store.reminders.filter(\.isCompleted)
+                .sorted { ($0.completionDate ?? .distantPast) > ($1.completionDate ?? .distantPast) }
+            result = TaskGrouping.dayGroups(completed, calendar: calendar) { $0.completionDate }
+                .reversed()
+                .map { (dayTitle($0.day), $0.items) }
+        }
+        return result.filter { !$0.items.isEmpty }
+    }
+
+    @ViewBuilder
     private var remindersList: some View {
-        List {
-            ForEach(store.lists, id: \.calendarIdentifier) { list in
-                let items = store.reminders.filter { $0.calendar?.calendarIdentifier == list.calendarIdentifier }
-                if !items.isEmpty {
-                    Section(list.title) {
-                        ForEach(items, id: \.calendarItemIdentifier) { reminder in
+        let sections = sections
+        if sections.isEmpty {
+            ContentUnavailableView(mode.emptyTitle, systemImage: "checklist")
+        } else {
+            List {
+                ForEach(sections.indices, id: \.self) { index in
+                    Section(sections[index].title) {
+                        ForEach(sections[index].items, id: \.calendarItemIdentifier) { reminder in
                             row(for: reminder)
                         }
                     }
                 }
             }
+            .refreshable { await store.refresh() }
         }
-        .refreshable { await store.refresh() }
     }
 
     private func row(for reminder: EKReminder) -> some View {
@@ -218,7 +314,9 @@ struct TasksView: View {
             VStack(alignment: .leading) {
                 Text(reminder.title ?? "").strikethrough(reminder.isCompleted)
                 if let date = reminder.dueDate {
-                    Text(date, style: .date).font(.caption).foregroundStyle(.secondary)
+                    let overdue = !reminder.isCompleted
+                        && TaskGrouping.dueBucket(reminder.dueDateComponents, now: .now, calendar: .current) == .overdue
+                    Text(date, style: .date).font(.caption).foregroundStyle(overdue ? Color.red : .secondary)
                 }
             }
         }
