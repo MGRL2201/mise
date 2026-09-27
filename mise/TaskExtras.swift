@@ -83,6 +83,13 @@ final class TaskExtras {
         do { try context.save() } catch { context.rollback(); throw error }
     }
 
+    /// Flips one subtask's done flag; unknown ids are a no-op. Saves.
+    static func toggleSubtask(_ id: UUID, in extras: TaskExtras, context: ModelContext) throws {
+        guard let index = extras.subtasks.firstIndex(where: { $0.id == id }) else { return }
+        extras.subtasks[index].done.toggle()
+        do { try context.save() } catch { context.rollback(); throw error }
+    }
+
     /// Links (or with nil, unlinks) a time-block event; creates a row only to store a link. Saves.
     static func setEventID(_ eventID: String?, in context: ModelContext, reminderID: String, externalID: String?) throws {
         var row = match(try context.fetch(FetchDescriptor<TaskExtras>()), id: reminderID, externalID: externalID)

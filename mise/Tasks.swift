@@ -234,6 +234,7 @@ enum TaskViewMode: String, CaseIterable {
 struct TasksView: View {
     @Environment(RemindersStore.self) private var store
     @Environment(\.openURL) private var openURL
+    @Environment(\.modelContext) private var context
     @State private var errorMessage: String?
     @State private var mode = TaskViewMode.today
     @State private var editing: EditingReminder?
@@ -244,6 +245,7 @@ struct TasksView: View {
     // Unknown `#list` prompts; separate so "No" can hand off to `creating` without the dismiss setter clobbering it.
     @State private var suggesting: Suggestion?
     @State private var creating: QuickAdd?
+    @State private var expanded: Set<String> = []  // calendarItemIdentifiers showing subtasks
     @Query(sort: \Tag.name) private var tags: [Tag]
     @Query private var extras: [TaskExtras]
 
@@ -470,7 +472,12 @@ struct TasksView: View {
         }
     }
 
+    @ViewBuilder
     private func row(for reminder: EKReminder) -> some View {
+        let id = reminder.calendarItemIdentifier
+        let extra = TaskExtras.match(extras, id: id, externalID: reminder.calendarItemExternalIdentifier)
+        let subtasks = extra?.subtasks ?? []
+        let isExpanded = expanded.contains(id)
         HStack {
             Button {
                 mutate { try store.setCompleted(reminder, !reminder.isCompleted) }
@@ -488,11 +495,35 @@ struct TasksView: View {
                             && TaskGrouping.dueBucket(reminder.dueDateComponents, now: .now, calendar: .current) == .overdue
                         Text(date, style: .date).font(.caption).foregroundStyle(overdue ? Color.red : .secondary)
                     }
+                    let tagNames = (extra?.tags ?? []).map(\.name).sorted()
+                    if !tagNames.isEmpty {
+                        // ponytail: one HStack line; many long tags clip instead of wrapping.
+                        HStack(spacing: 4) {
+                            ForEach(tagNames, id: \.self) { name in
+                                Text(name).font(.caption2)
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(.quaternary, in: Capsule())
+                            }
+                        }
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            if !subtasks.isEmpty {
+                Text("\(subtasks.filter(\.done).count)/\(subtasks.count)").font(.caption).foregroundStyle(.secondary)
+                // Custom chevron, not DisclosureGroup: its label tap would steal the row's tap-to-edit.
+                Button {
+                    withAnimation { if isExpanded { expanded.remove(id) } else { expanded.insert(id) } }
+                } label: {
+                    Image(systemName: "chevron.right").rotationEffect(.degrees(isExpanded ? 90 : 0))
+                        .padding(8)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isExpanded ? "Hide subtasks" : "Show subtasks")
+            }
         }
         .swipeActions {
             // No .destructive role: it animates the row out before the linked-event dialog shows.
@@ -500,6 +531,23 @@ struct TasksView: View {
         }
         .contextMenu {
             Button("Delete", role: .destructive) { delete(reminder) }
+        }
+        if isExpanded, let extra {
+            ForEach(subtasks) { subtask in
+                Button {
+                    mutate { try TaskExtras.toggleSubtask(subtask.id, in: extra, context: context) }
+                } label: {
+                    HStack {
+                        Image(systemName: subtask.done ? "checkmark.circle.fill" : "circle").accessibilityHidden(true)
+                        Text(subtask.title).strikethrough(subtask.done)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(subtask.done ? .isSelected : [])
+                .padding(.leading, 28)
+            }
         }
     }
 
