@@ -1,16 +1,10 @@
 {
   "images" : [
     {
-      "filename" : "AppIcon.png",
+      "filename" : "AppIcon-ColdBrew.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
-    },
-    {
-      "filename" : "AppIcon.png",
-      "idiom" : "mac",
-      "scale" : "2x",
-      "size" : "512x512"
     }
   ],
   "info" : {
