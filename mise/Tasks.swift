@@ -236,6 +236,7 @@ struct TasksView: View {
     @State private var filterTag: String?
     @State private var quickText = ""
     @State private var parsing = false
+    @State private var deleting: EKReminder?
     @Query(sort: \Tag.name) private var tags: [Tag]
     @Query private var extras: [TaskExtras]
 
@@ -275,6 +276,11 @@ struct TasksView: View {
                 }
             }
             .sheet(item: $editing) { TaskEditor(reminder: $0.reminder) }
+            .confirmationDialog("Delete this task?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+                                presenting: deleting) { reminder in
+                Button("Delete Task and Event", role: .destructive) { mutate { try store.delete(reminder, deletingEvent: true) } }
+                Button("Delete Task Only", role: .destructive) { mutate { try store.delete(reminder) } }
+            }
             .task { await store.refresh() }
             // ponytail: day rollover only; timed reminders passing their due time mid-day don't turn red until the next re-render.
             .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in Task { await store.refresh() } }
@@ -431,14 +437,11 @@ struct TasksView: View {
             .buttonStyle(.plain)
         }
         .swipeActions {
-            Button("Delete", role: .destructive) {
-                mutate { try store.delete(reminder) }
-            }
+            // No .destructive role: it animates the row out before the linked-event dialog shows.
+            Button("Delete") { delete(reminder) }.tint(.red)
         }
         .contextMenu {
-            Button("Delete", role: .destructive) {
-                mutate { try store.delete(reminder) }
-            }
+            Button("Delete", role: .destructive) { delete(reminder) }
         }
     }
 
@@ -447,6 +450,15 @@ struct TasksView: View {
             try action()
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Asks whether to take the linked time-block event along; plain tasks go immediately.
+    private func delete(_ reminder: EKReminder) {
+        if store.linkedEvent(for: reminder) != nil {
+            deleting = reminder
+        } else {
+            mutate { try store.delete(reminder) }
         }
     }
 }

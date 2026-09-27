@@ -119,6 +119,7 @@ struct TaskDraft: Equatable {
 struct TaskEditor: View {
     let reminder: EKReminder
     @Environment(RemindersStore.self) private var store
+    @Environment(CalendarStore.self) private var calendarStore
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Tag.name) private var allTags: [Tag]
@@ -130,6 +131,11 @@ struct TaskEditor: View {
     @State private var loadedExtras = false
     @State private var errorMessage: String?
     @State private var confirmingDelete = false
+    @State private var timeBlocked = false
+    @State private var blockStart = Date()
+    @State private var blockMinutes = 30
+    @State private var blockCalendarID: String?
+    @State private var loadedBlock: (start: Date, minutes: Int, calendarID: String?)?
 
     init(reminder: EKReminder) {
         self.reminder = reminder
@@ -191,6 +197,27 @@ struct TaskEditor: View {
                     }
                     Button("Add Alarm") {
                         draft.alarms.append(draft.hasDueDate ? draft.dueDate : .now.addingTimeInterval(3600))
+                    }
+                }
+                Section("Time Block") {
+                    if calendarStore.hasAccess {
+                        Toggle("Time Block", isOn: $timeBlocked)
+                        if timeBlocked {
+                            DatePicker("Start", selection: $blockStart, displayedComponents: [.date, .hourAndMinute])
+                            Stepper("Duration: \(Duration.seconds(blockMinutes * 60).formatted(.units(allowed: [.hours, .minutes], width: .abbreviated)))",
+                                    value: $blockMinutes, in: 15...720, step: 15)
+                            Picker("Calendar", selection: $blockCalendarID) {
+                                Text("Default").tag(String?.none)
+                                ForEach(calendarStore.calendars.filter(\.allowsContentModifications), id: \.calendarIdentifier) { calendar in
+                                    Text(calendar.title).tag(Optional(calendar.calendarIdentifier))
+                                }
+                            }
+                        }
+                    } else if calendarStore.status == .notDetermined {
+                        Button("Allow Calendar Access") { Task { await calendarStore.requestAccess() } }
+                    } else {
+                        Text("Calendar access is off. Turn it on in Settings to time-block tasks.")
+                            .foregroundStyle(.secondary)
                     }
                 }
                 Section {
@@ -278,6 +305,15 @@ struct TaskEditor: View {
                             try TaskExtras.write(in: modelContext, reminderID: reminder.calendarItemIdentifier,
                                                  externalID: reminder.calendarItemExternalIdentifier,
                                                  subtasks: subtasks, tagNames: tagNames)
+                            if timeBlocked {
+                                if loadedBlock.map({ ($0.start, $0.minutes, $0.calendarID) != (blockStart, blockMinutes, blockCalendarID) }) ?? true {
+                                    try createTimeBlock(for: reminder, start: blockStart, duration: TimeInterval(blockMinutes * 60),
+                                                        calendar: calendarStore.calendars.first { $0.calendarIdentifier == blockCalendarID },
+                                                        calendarStore: calendarStore, context: modelContext)
+                                }
+                            } else if loadedBlock != nil {
+                                try store.removeTimeBlock(for: reminder)
+                            }
                         }
                     }
                     .disabled(draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -290,9 +326,29 @@ struct TaskEditor: View {
                                               externalID: reminder.calendarItemExternalIdentifier)
                 subtasks = extras?.subtasks ?? []
                 tagNames = (extras?.tags ?? []).map(\.name).sorted()
+                if let event = store.linkedEvent(for: reminder) {
+                    timeBlocked = true
+                    blockStart = event.startDate
+                    blockMinutes = min(720, max(15, Int(event.endDate.timeIntervalSince(event.startDate) / 60)))
+                    // Read-only calendar isn't a Picker option; show Default (nil keeps the event where it is on save).
+                    blockCalendarID = event.calendar.flatMap { $0.allowsContentModifications ? $0.calendarIdentifier : nil }
+                    loadedBlock = (blockStart, blockMinutes, blockCalendarID)
+                } else {
+                    blockStart = draft.hasDueDate && draft.includesTime ? draft.dueDate
+                        : Calendar.current.nextDate(after: .now, matching: DateComponents(minute: 0), matchingPolicy: .nextTime) ?? .now
+                    blockCalendarID = calendarStore.eventStore.defaultCalendarForNewEvents?.calendarIdentifier
+                }
+            }
+            .task {
+                if calendarStore.hasAccess && calendarStore.calendars.isEmpty { await calendarStore.refresh() }
             }
             .confirmationDialog("Delete this task?", isPresented: $confirmingDelete) {
-                Button("Delete Task", role: .destructive) { mutate { try store.delete(reminder) } }
+                if loadedBlock != nil {
+                    Button("Delete Task and Event", role: .destructive) { mutate { try store.delete(reminder, deletingEvent: true) } }
+                    Button("Delete Task Only", role: .destructive) { mutate { try store.delete(reminder) } }
+                } else {
+                    Button("Delete Task", role: .destructive) { mutate { try store.delete(reminder) } }
+                }
             }
             .alert(
                 "Couldn't update reminder",
