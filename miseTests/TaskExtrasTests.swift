@@ -134,4 +134,41 @@ struct TaskExtrasTests {
                              subtasks: [Subtask(title: "keep"), Subtask(title: " \n")], tagNames: [])
         #expect(try context.fetch(FetchDescriptor<TaskExtras>()).first?.subtasks.map(\.title) == ["keep"])
     }
+
+    @Test func setEventIDCreatesUpdatesAndClears() throws {
+        let context = context()
+        try TaskExtras.setEventID(nil, in: context, reminderID: "none", externalID: nil)
+        #expect(try context.fetch(FetchDescriptor<TaskExtras>()).isEmpty)
+
+        try TaskExtras.setEventID("e1", in: context, reminderID: "r", externalID: "x")
+        var rows = try context.fetch(FetchDescriptor<TaskExtras>())
+        #expect(rows.count == 1 && rows.first?.eventID == "e1")
+
+        try TaskExtras.setEventID("e2", in: context, reminderID: "r2", externalID: "x")
+        rows = try context.fetch(FetchDescriptor<TaskExtras>())
+        #expect(rows.count == 1 && rows.first?.eventID == "e2")
+
+        try TaskExtras.setEventID(nil, in: context, reminderID: "r2", externalID: "x")
+        #expect(try context.fetch(FetchDescriptor<TaskExtras>()).first?.eventID == nil)
+    }
+
+    @Test func writeKeepsEventID() throws {
+        let context = context()
+        try TaskExtras.setEventID("e1", in: context, reminderID: "r", externalID: nil)
+        try TaskExtras.write(in: context, reminderID: "r", externalID: nil, subtasks: [Subtask(title: "one")], tagNames: [])
+        #expect(try context.fetch(FetchDescriptor<TaskExtras>()).first?.eventID == "e1")
+    }
+
+    @Test func reconcileMergeCarriesEventID() throws {
+        let context = context()
+        let old = extras("old-id", "ext", in: context)
+        old.eventID = "e1"
+        let fresh = extras("new-id", nil, in: context)
+        try context.save()
+
+        try TaskExtras.reconcile(context, reminders: [(id: "new-id", externalID: "ext")], exists: { _ in false })
+
+        #expect(try context.fetch(FetchDescriptor<TaskExtras>()).count == 1)
+        #expect(fresh.eventID == "e1")
+    }
 }

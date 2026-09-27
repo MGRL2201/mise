@@ -44,6 +44,10 @@ final class TaskExtras {
     var tags: [Tag]? = []
     /// When reconcile first found the reminder gone; nil while it exists.
     var missingSince: Date?
+    /// EKEvent.eventIdentifier of the linked time-block event.
+    // ponytail: eventIdentifier can change when the event is moved between calendars outside mise,
+    // losing the link; upgrade path = also store the event's calendarItemExternalIdentifier as fallback.
+    var eventID: String?
 
     init(reminderID: String, externalID: String?) {
         self.reminderID = reminderID
@@ -79,6 +83,17 @@ final class TaskExtras {
         do { try context.save() } catch { context.rollback(); throw error }
     }
 
+    /// Links (or with nil, unlinks) a time-block event; creates a row only to store a link. Saves.
+    static func setEventID(_ eventID: String?, in context: ModelContext, reminderID: String, externalID: String?) throws {
+        var row = match(try context.fetch(FetchDescriptor<TaskExtras>()), id: reminderID, externalID: externalID)
+        if row == nil, eventID != nil {
+            row = TaskExtras(reminderID: reminderID, externalID: externalID)
+            context.insert(row!)
+        }
+        row?.eventID = eventID
+        do { try context.save() } catch { context.rollback(); throw error }
+    }
+
     /// Keeps extras whose reminder is listed (relinking on id change, merging into
     /// any row that already owns the new id). Rows whose reminder is neither listed
     /// nor `exists` (e.g. an old completed reminder outside the fetch window) are
@@ -99,6 +114,7 @@ final class TaskExtras {
             } else if let externalID = extras.externalID, let id = idByExternal[externalID] {
                 if let owner = owners[id], owner !== extras {
                     owner.subtasks += extras.subtasks
+                    owner.eventID = owner.eventID ?? extras.eventID
                     owner.tags = (owner.tags ?? []) + (extras.tags ?? []).filter { tag in
                         !(owner.tags ?? []).contains { $0 === tag }
                     }

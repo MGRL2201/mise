@@ -110,11 +110,37 @@ import UIKit
     func setCompleted(_ reminder: EKReminder, _ done: Bool) throws {
         reminder.isCompleted = done
         try save(reminder)
+        if let event = linkedEvent(for: reminder) {
+            event.title = TimeBlock.title(event.title ?? "", done: done)
+            // Best effort: the reminder is already saved; a stale event title isn't worth failing it.
+            do { try eventStore.save(event, span: .thisEvent, commit: true) } catch { event.rollback() }
+        }
     }
 
-    func delete(_ reminder: EKReminder) throws {
+    func delete(_ reminder: EKReminder, deletingEvent: Bool = false) throws {
+        let event = deletingEvent ? linkedEvent(for: reminder) : nil
         try eventStore.remove(reminder, commit: true)
         reminders.removeAll { $0.calendarItemIdentifier == reminder.calendarItemIdentifier }
+        // Best effort: the task is already gone; don't report an error for it.
+        if let event { try? eventStore.remove(event, span: .thisEvent, commit: true) }
+    }
+
+    /// The time-block event linked via TaskExtras; nil without a context or link.
+    func linkedEvent(for reminder: EKReminder) -> EKEvent? {
+        guard let context,
+              let rows = try? context.fetch(FetchDescriptor<TaskExtras>()),
+              let eventID = TaskExtras.match(rows, id: reminder.calendarItemIdentifier,
+                                             externalID: reminder.calendarItemExternalIdentifier)?.eventID
+        else { return nil }
+        return eventStore.event(withIdentifier: eventID)
+    }
+
+    /// Deletes the linked time-block event (if any) and clears the link.
+    func removeTimeBlock(for reminder: EKReminder) throws {
+        guard let context else { return }
+        if let event = linkedEvent(for: reminder) { try eventStore.remove(event, span: .thisEvent, commit: true) }
+        try TaskExtras.setEventID(nil, in: context, reminderID: reminder.calendarItemIdentifier,
+                                  externalID: reminder.calendarItemExternalIdentifier)
     }
 
     func newList(title: String) throws -> EKCalendar {
