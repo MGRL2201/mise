@@ -241,6 +241,9 @@ struct TasksView: View {
     @State private var quickText = ""
     @State private var parsing = false
     @State private var deleting: EKReminder?
+    // Unknown `#list` prompts; separate so "No" can hand off to `creating` without the dismiss setter clobbering it.
+    @State private var suggesting: Suggestion?
+    @State private var creating: QuickAdd?
     @Query(sort: \Tag.name) private var tags: [Tag]
     @Query private var extras: [TaskExtras]
 
@@ -249,7 +252,16 @@ struct TasksView: View {
         var id: String { reminder.calendarItemIdentifier }
     }
 
+    private struct Suggestion {
+        let quick: QuickAdd
+        let list: String
+    }
+
     var body: some View {
+        quickAddPrompts(mainView)
+    }
+
+    private var mainView: some View {
         content
             .navigationTitle("Tasks")
             .themedBackground()
@@ -308,12 +320,53 @@ struct TasksView: View {
             // ponytail: two writable lists with the same title resolve to the first; user confirms in editor.
             let writable = store.lists.filter(\.allowsContentModifications)
             let q = await QuickAdd.parseSmart(text, lists: writable.map(\.title))
-            let r = store.newReminder()
-            q.apply(to: r, lists: writable)
             quickText = ""
             parsing = false
-            editing = EditingReminder(reminder: r)
+            if q.listName == nil, let name = q.unknownList {
+                if let list = QuickAdd.closeMatch(name, in: writable.map(\.title)) {
+                    suggesting = Suggestion(quick: q, list: list)
+                } else {
+                    creating = q
+                }
+            } else {
+                openEditor(q)
+            }
         }
+    }
+
+    /// Unknown `#list` prompts. Button actions run before the dismiss setter, so a non-nil value there means dismissed without a choice.
+    private func quickAddPrompts(_ view: some View) -> some View {
+        view
+            .confirmationDialog(Text(suggesting.map { "Did you mean \($0.list)?" } ?? ""),
+                                isPresented: Binding(get: { suggesting != nil }, set: { if !$0, let s = suggesting { suggesting = nil; openEditor(s.quick) } }),
+                                titleVisibility: .visible, presenting: suggesting) { s in
+                Button("Use \(s.list)") {
+                    var q = s.quick
+                    q.listName = s.list
+                    suggesting = nil
+                    openEditor(q)
+                }
+                Button("No") { suggesting = nil; creating = s.quick }
+            }
+            .alert(Text(creating.map { "Create list \"\($0.unknownList ?? "")\"?" } ?? ""),
+                   isPresented: Binding(get: { creating != nil }, set: { if !$0, let q = creating { creating = nil; openEditor(q) } }),
+                   presenting: creating) { q in
+                Button("Create") {
+                    creating = nil
+                    var q = q
+                    if let name = q.unknownList {
+                        do { q.listName = try store.newList(title: name).title } catch { errorMessage = error.localizedDescription }
+                    }
+                    openEditor(q)
+                }
+                Button("Use Default List", role: .cancel) { creating = nil; openEditor(q) }
+            }
+    }
+
+    private func openEditor(_ q: QuickAdd) {
+        let r = store.newReminder()
+        q.apply(to: r, lists: store.lists.filter(\.allowsContentModifications))
+        editing = EditingReminder(reminder: r)
     }
 
     @ViewBuilder
