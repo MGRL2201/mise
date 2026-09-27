@@ -1,0 +1,12 @@
+{
+  "images" : [
+    {
+      "filename" : "IconPreview-Cappuccino.png",
+      "idiom" : "universal"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}

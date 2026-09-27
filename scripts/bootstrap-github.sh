@@ -42,7 +42,7 @@ JSON
 done
 
 # --- labels (--force = create or update) --------------------------------------
-for m in foundation tasks calendar finance notes news today sync widgets mac; do
+for m in foundation tasks calendar finance notes news today sync widgets mac watch; do
   gh label create "module:$m" --repo "$REPO" --color 1d76db --force >/dev/null
 done
 gh label create feature       --repo "$REPO" --color 0e8a16 --force >/dev/null
@@ -59,8 +59,9 @@ M5="Phase 5: Notes"
 M6="Phase 6: News"
 M7="Phase 7: Today, widgets, quick capture, search"
 M8="Phase 8: Mac polish & cross-device sync"
+M9="Phase 9: watchOS"
 existing_ms=$(gh api "repos/$REPO/milestones?state=all&per_page=100" -q '.[].title')
-for t in "$M1" "$M2" "$M3" "$M4" "$M5" "$M6" "$M7" "$M8"; do
+for t in "$M1" "$M2" "$M3" "$M4" "$M5" "$M6" "$M7" "$M8" "$M9"; do
   grep -Fxq "$t" <<<"$existing_ms" || gh api "repos/$REPO/milestones" -f title="$t" >/dev/null
 done
 
