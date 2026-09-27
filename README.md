@@ -36,7 +36,8 @@ For the Apple Watch, enable Developer Mode on the watch, select the watch app
 scheme and the watch as destination, and Run. Same 7-day expiry.
 
 API keys (e.g. stock prices) are entered in the app at runtime and stored in
-the Keychain. Never commit keys; `*.xcconfig` files are git-ignored.
+the Keychain. Never commit keys; `*.xcconfig` files are git-ignored except the committed
+defaults in `*.shared.xcconfig`.
 
 ## Branch workflow
 
@@ -50,4 +51,17 @@ no force pushes, no deletion, rules apply to admins too. Required approvals are
 0 (solo developer).
 
 Flow: pick issue → branch from `develop` → commit → PR into `develop`
-("Closes #N") → merge. At a milestone, PR `develop` → `main`.
+("Closes #N") → squash-merge. Branches are deleted automatically on merge.
+
+Merge rules (GitHub rulesets): `develop` accepts squash merges only (one
+commit per change); `main` accepts merge commits only, so `main` never drifts
+from `develop`.
+
+## Releasing a phase
+
+When every issue in a phase milestone is closed:
+
+1. Open a PR from `develop` into `main` titled `release: phase N`.
+2. Merge it with a merge commit.
+3. Tag the merge commit and push the tag:
+   `git tag -a phase-N -m "Phase N" && git push origin phase-N`.
