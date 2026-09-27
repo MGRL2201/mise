@@ -133,11 +133,28 @@ extension BackupTests {
 
     @Test func version1BackupStillRestores() throws {
         let target = try freshStore()
-        _ = try mise.Tag.named("Stale", in: target.context)
+        let kept = try #require(try mise.Tag.named("Kept", in: target.context))
+        let extras = TaskExtras(reminderID: "r1", externalID: nil)
+        target.context.insert(extras)
+        extras.tags = [kept]
         try target.context.save()
         let settings = try PropertyListSerialization.data(fromPropertyList: [String: Any](), format: .binary, options: 0)
         let json = #"{"version":1,"createdAt":0,"attachments":[],"settings":"\#(settings.base64EncodedString())"}"#
         try restore(Data(json.utf8), into: target)
-        #expect(try target.context.fetch(FetchDescriptor<mise.Tag>()).isEmpty)
+        #expect(try target.context.fetch(FetchDescriptor<mise.Tag>()).map(\.name) == ["Kept"])
+        let left = try target.context.fetch(FetchDescriptor<TaskExtras>())
+        #expect(left.map(\.reminderID) == ["r1"] && left.first?.tags?.map(\.name) == ["Kept"])
+    }
+
+    @Test func duplicateTagNamesRestoreAsOneTag() throws {
+        let target = try freshStore()
+        let settings = try PropertyListSerialization.data(fromPropertyList: [String: Any](), format: .binary, options: 0)
+        let backup = Backup(version: 2, createdAt: .now, attachments: [], settings: settings,
+                            tags: ["Work", " work "],
+                            taskExtras: [.init(reminderID: "r1", externalID: nil, subtasks: [], tagNames: ["WORK"])])
+        try restore(try JSONEncoder().encode(backup), into: target)
+        let tags = try target.context.fetch(FetchDescriptor<mise.Tag>())
+        #expect(tags.map(\.name) == ["Work"])
+        #expect(try target.context.fetch(FetchDescriptor<TaskExtras>()).first?.tags?.first === tags.first)
     }
 }

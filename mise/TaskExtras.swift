@@ -41,6 +41,8 @@ final class TaskExtras {
     var externalID: String?
     var subtasks: [Subtask] = []  // array order = display order
     var tags: [Tag]? = []
+    /// When reconcile first found the reminder gone; nil while it exists.
+    var missingSince: Date?
 
     init(reminderID: String, externalID: String?) {
         self.reminderID = reminderID
@@ -53,18 +55,41 @@ final class TaskExtras {
         return all.first { $0.externalID == externalID }
     }
 
-    /// Keeps extras whose reminder is listed (relinking on id change), and deletes
-    /// the rest unless `exists` says the reminder is still there (e.g. an old
-    /// completed reminder outside the store's fetch window).
+    /// Keeps extras whose reminder is listed (relinking on id change, merging into
+    /// any row that already owns the new id). Rows whose reminder is neither listed
+    /// nor `exists` (e.g. an old completed reminder outside the fetch window) are
+    /// stamped `missingSince` and deleted once missing for 7 days.
+    // ponytail: 7-day grace so an empty/partial fetch (iCloud not synced yet, signed out,
+    // fetch error) never wipes extras; a truly deleted reminder's extras linger up to a week.
     static func reconcile(_ context: ModelContext, reminders: [(id: String, externalID: String?)],
-                          exists: (TaskExtras) -> Bool) throws {
+                          now: Date = .now, exists: (TaskExtras) -> Bool) throws {
+        let all = try context.fetch(FetchDescriptor<TaskExtras>())
         let ids = Set(reminders.map(\.id))
-        for extras in try context.fetch(FetchDescriptor<TaskExtras>()) where !ids.contains(extras.reminderID) {
-            if let externalID = extras.externalID, !externalID.isEmpty,
-               let reminder = reminders.first(where: { $0.externalID == externalID }) {
-                extras.reminderID = reminder.id
-            } else if !exists(extras) {
-                context.delete(extras)
+        let idByExternal = Dictionary(reminders.compactMap { reminder in
+            reminder.externalID.flatMap { $0.isEmpty ? nil : ($0, reminder.id) }
+        }, uniquingKeysWith: { first, _ in first })
+        var owners = Dictionary(all.map { ($0.reminderID, $0) }, uniquingKeysWith: { first, _ in first })
+        for extras in all {
+            if ids.contains(extras.reminderID) {
+                extras.missingSince = nil
+            } else if let externalID = extras.externalID, let id = idByExternal[externalID] {
+                if let owner = owners[id], owner !== extras {
+                    owner.subtasks += extras.subtasks
+                    owner.tags = (owner.tags ?? []) + (extras.tags ?? []).filter { tag in
+                        !(owner.tags ?? []).contains { $0 === tag }
+                    }
+                    context.delete(extras)
+                } else {
+                    extras.reminderID = id
+                    extras.missingSince = nil
+                    owners[id] = extras
+                }
+            } else if exists(extras) {
+                extras.missingSince = nil
+            } else if let since = extras.missingSince {
+                if now.timeIntervalSince(since) >= 7 * 86400 { context.delete(extras) }
+            } else {
+                extras.missingSince = now
             }
         }
         try context.save()

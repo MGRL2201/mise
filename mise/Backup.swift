@@ -87,19 +87,23 @@ enum BackupService {
                 attachment.createdAt = record.createdAt
                 context.insert(attachment)
             }
-            try context.fetch(FetchDescriptor<TaskExtras>()).forEach(context.delete)
-            try context.fetch(FetchDescriptor<Tag>()).forEach(context.delete)
-            var tagsByName: [String: Tag] = [:]
-            for name in backup.tags ?? [] {
-                let tag = Tag(name: name)
-                context.insert(tag)
-                tagsByName[name] = tag
-            }
-            for record in backup.taskExtras ?? [] {
-                let extras = TaskExtras(reminderID: record.reminderID, externalID: record.externalID)
-                extras.subtasks = record.subtasks
-                context.insert(extras)
-                extras.tags = record.tagNames.compactMap { tagsByName[$0] }
+            // Version-1 backups carry no tags/extras: leave existing ones alone.
+            if let tagNames = backup.tags, let records = backup.taskExtras {
+                try context.fetch(FetchDescriptor<TaskExtras>()).forEach(context.delete)
+                try context.fetch(FetchDescriptor<Tag>()).forEach(context.delete)
+                func key(_ name: String) -> String { name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                var tagsByKey: [String: Tag] = [:]
+                for name in tagNames where tagsByKey[key(name)] == nil {
+                    let tag = Tag(name: name)
+                    context.insert(tag)
+                    tagsByKey[key(name)] = tag
+                }
+                for record in records {
+                    let extras = TaskExtras(reminderID: record.reminderID, externalID: record.externalID)
+                    extras.subtasks = record.subtasks
+                    context.insert(extras)
+                    extras.tags = record.tagNames.compactMap { tagsByKey[key($0)] }
+                }
             }
             try context.save()
         } catch {
