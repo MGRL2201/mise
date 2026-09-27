@@ -151,6 +151,7 @@ struct CalendarView: View {
 }
 
 private extension EKEvent {
-    // Recurring occurrences share eventIdentifier; startDate tells them apart.
-    var rowID: String { "\(eventIdentifier ?? "")|\(startDate.timeIntervalSinceReferenceDate)" }
+    // Recurring occurrences share eventIdentifier; occurrenceDate (the original
+    // series slot) tells them apart even when a detached occurrence is moved.
+    var rowID: String { "\(eventIdentifier ?? "")|\(occurrenceDate.timeIntervalSinceReferenceDate)" }
 }

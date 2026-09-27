@@ -67,7 +67,6 @@ struct CalendarStoreTests {
             }
         }
         let editedTitle = "mise test event edited externally"
-        let before = try #require(occurrences().first)
         let changed = Flag()
         withObservationTracking { _ = store.events } onChange: { changed.fired = true }
         try await pollUntil(timeout: 5) {
@@ -77,8 +76,6 @@ struct CalendarStoreTests {
             return true
         }
         try await pollUntil(timeout: 5) { occurrences().first?.title == editedTitle }
-        let after = try #require(occurrences().first)
-        print("#126 diag event: === \(after === before), == \(after == before)")
         // #126: SwiftUI only re-renders if observers are notified.
         try await pollUntil(timeout: 5) { changed.fired }
 

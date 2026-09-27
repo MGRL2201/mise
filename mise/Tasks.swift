@@ -104,13 +104,10 @@ import UIKit
             reminder.rollback()
             throw error
         }
-        // Same instance written back is ==; force the notify (#126).
-        withMutation(keyPath: \.reminders) {
-            if let index = reminders.firstIndex(where: { $0.calendarItemIdentifier == reminder.calendarItemIdentifier }) {
-                reminders[index] = reminder
-            } else {
-                reminders.append(reminder)
-            }
+        if let index = reminders.firstIndex(where: { $0.calendarItemIdentifier == reminder.calendarItemIdentifier }) {
+            reminders[index] = reminder
+        } else {
+            reminders.append(reminder)
         }
     }
 
