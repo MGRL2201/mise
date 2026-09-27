@@ -67,7 +67,7 @@ nonisolated struct SpikeProvider: TimelineProvider {
         let start = Calendar.current.startOfDay(for: .now)
         let end = Calendar.current.date(byAdding: .day, value: 1, to: start)!
         let today = store.events(matching: store.predicateForEvents(withStart: start, end: end, calendars: nil))
-        let next = today.filter { $0.endDate > .now }.min { $0.startDate < $1.startDate }
+        let next = today.filter { !$0.isAllDay && $0.startDate > .now }.min { $0.startDate < $1.startDate }
         return "Today: \(today.count), next: \(next?.title ?? "none")"
     }
 }

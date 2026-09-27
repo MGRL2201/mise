@@ -485,9 +485,10 @@ To be filled in as capability spikes (Phase 1, Phase 9) complete.
      `Today: <count>, next: <title>` (before: `EventKit: notDetermined`).
 - **Timeline:** `.after(+15 min)`; app reloads timelines on launch and after
   the calendar grant.
-- **Chosen path:** WidgetKit + App Group works on the free account.
-  Tasks/events widgets read EventKit directly in the extension; no snapshot
-  needed.
+- **Proposed path (pending user checks above):** WidgetKit + App Group works
+  on the free account. Events widgets read EventKit directly in the extension
+  (`.event` full access verified in build only); no snapshot needed. Reminders
+  access for task widgets not tested — needs its own usage key and grant.
 
 ### Foundation Models (Phase 1 spike, #14)
 
