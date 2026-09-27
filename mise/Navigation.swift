@@ -111,7 +111,7 @@ struct ContentView: View {
                 NavigationStack { PlaceholderView(destination: .today) }
             }
             Tab("Tasks", systemImage: Destination.tasks.systemImage, value: .tasks) {
-                NavigationStack { PlaceholderView(destination: .tasks) }
+                NavigationStack { detailView(for: .tasks) }
             }
             Tab("Calendar", systemImage: Destination.calendar.systemImage, value: .calendar) {
                 NavigationStack { PlaceholderView(destination: .calendar) }
@@ -146,6 +146,8 @@ struct ContentView: View {
     private func detailView(for destination: Destination) -> some View {
         if destination == .settings {
             SettingsView()
+        } else if destination == .tasks {
+            TasksView()
         } else if destination == .money && lock.mode == .financeAndNotes && !lock.isUnlocked {
             // ponytail: Notes isn't gated; per-note lock (Phase 5, SPEC §6.5) will reuse AppLock.isUnlocked.
             LockView()
