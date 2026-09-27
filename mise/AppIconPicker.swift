@@ -28,6 +28,7 @@ struct AppIconOption {
 struct AppIconPicker: View {
     @State private var current = UIApplication.shared.alternateIconName
     @State private var error: String?
+    @State private var busy = false
 
     var body: some View {
         ScrollView {
@@ -70,7 +71,9 @@ struct AppIconPicker: View {
     }
 
     private func select(_ option: AppIconOption) async {
-        guard option.alternateName != current else { return }
+        guard !busy, option.alternateName != current else { return }
+        busy = true
+        defer { busy = false }
         do {
             try await UIApplication.shared.setAlternateIconName(option.alternateName)
             current = UIApplication.shared.alternateIconName
