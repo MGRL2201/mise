@@ -9,11 +9,15 @@ enum Storage {
         Attachment.self,
     ]
 
+    /// `groupContainer: .none`: the default (.automatic) moves the store into
+    /// the App Group once that entitlement exists (#10). Keep it app-private.
+    static let configuration = ModelConfiguration(schema: Schema(models), groupContainer: .none)
+
     static func makeContainer() -> ModelContainer {
         // ponytail: plain on-disk container, no CloudKit config yet. Swap in
         // a CloudKit-backed ModelConfiguration later (SPEC §2.5) — model
         // shapes here already avoid @Attribute(.unique) to stay compatible.
-        try! ModelContainer(for: Schema(Storage.models))
+        try! ModelContainer(for: Schema(Storage.models), configurations: configuration)
     }
 }
 

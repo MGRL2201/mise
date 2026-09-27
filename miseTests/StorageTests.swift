@@ -37,4 +37,15 @@ struct StorageTests {
         try store.delete(for: id)
         #expect(store.read(for: id) == nil)
     }
+
+    #if os(iOS)
+    /// The store must stay app-private: SwiftData's default configuration
+    /// moves it into the App Group container once the entitlement exists.
+    @Test func storeIsNotInAppGroupContainer() throws {
+        let group = try #require(SharedStore.containerURL)
+        let store = Storage.configuration.url
+        #expect(!store.standardizedFileURL.path.hasPrefix(group.standardizedFileURL.path),
+                "store \(store.path) is inside App Group \(group.path)")
+    }
+    #endif
 }
