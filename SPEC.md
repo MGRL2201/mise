@@ -65,8 +65,9 @@ Per Apple's capability table for free accounts:
 | Foundation Models on watchOS | Not available on watchOS (any account); delegated to phone |
 | EventKit on watchOS | **VERIFY** |
 
-App Intents / App Shortcuts are not the legacy SiriKit entitlement, but whether
-Siri invocation works on a free account must be verified on device.
+App Intents / App Shortcuts are not the legacy SiriKit entitlement: they build,
+sign, and install on the free account with no entitlement (#12, §12); Siri
+invocation is pending a user check on device.
 
 ### 2.4 Phase-1 capability spike
 
@@ -227,7 +228,7 @@ and documented here.
   by tag/priority, completed log.
 - **Quick add** with natural language parsed on-device by Foundation Models,
   e.g. "pay rent every 1st 9am !high".
-- **Siri / Shortcuts** via App Intents (**VERIFY** on free account).
+- **Siri / Shortcuts** via App Intents (spike #12, §12).
 - **Widget** with interactive check-off.
 - Excluded from v1: location-based reminders.
 
@@ -489,6 +490,37 @@ To be filled in as capability spikes (Phase 1, Phase 9) complete.
   on the free account. Events widgets read EventKit directly in the extension
   (`.event` full access verified in build only); no snapshot needed. Reminders
   access for task widgets not tested — needs its own usage key and grant.
+
+### App Intents / Siri (Phase 1 spike, #12)
+
+- **Date / device:** 2026-09-27, iPhone 16 Pro Max, iOS 26.7, Xcode 27, free
+  Personal Team. Harness: `mise/AddTaskIntent.swift` (`AddTaskIntent` +
+  `MiseShortcuts` provider) in the main app target,
+  `miseTests/AddTaskIntentTests.swift`. Spike store: `UserDefaults.standard`
+  key `spike.siriTasks`.
+- **Provisioning:** `xcodebuild -allowProvisioningUpdates` succeeded with the
+  existing `<prefix>.mise` profile. No new App ID, no Siri entitlement;
+  `codesign -d --entitlements` on the app shows only the #10 entitlements.
+- **Verified automatically:** iOS Simulator suite and macOS build pass; device
+  build, install and launch; `mise.app/Metadata.appintents` lists
+  `AddTaskIntent` and the auto shortcut (phrases `Add a task in
+  ${applicationName}`, `Add task to ${applicationName}`, short title
+  "Add Task", `checklist`) plus `root.ssu.yaml` / `nlu/`;
+  `AddTaskIntentTests` passes on device.
+- **Parameter in phrase:** App Shortcut phrases can only embed
+  `AppEntity`/`AppEnum` parameters, not `String`. Siri asks for the title as a
+  follow-up (`requestValueDialog: "What's the task?"`).
+- **Gotcha:** an incremental build skipped `AppIntentsSSUTraining` for the app
+  (no `nlu/` in `Metadata.appintents`); a clean build generated it. Clean-build
+  before testing new Siri phrases.
+- **Pending user checks** (Result: pending user confirmation):
+  1. Shortcuts app → App Shortcuts (or search "mise") → "Add Task" tile present.
+  2. "Hey Siri, add a task in mise" → Siri asks "What's the task?" → "buy
+     milk" → Siri replies "Added buy milk to mise."
+  3. Optional: tap the "Add Task" tile in Shortcuts, enter a title, same reply.
+- **Proposed path (pending user checks above):** App Intents in the main app
+  for Siri/Shortcuts; no extension needed. Real add writes to Reminders via
+  EventKit (§6.2) in the Tasks phase.
 
 ### Foundation Models (Phase 1 spike, #14)
 
