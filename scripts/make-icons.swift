@@ -132,7 +132,7 @@ func srgbString(_ hex: String) -> String {
 json([
     "fill": ["automatic-gradient": srgbString(glass[0])],
     "groups": [
-        ["layers": [["image-name": "m.svg", "name": "m"]], "shadow": ["kind": "neutral", "opacity": 0.5]],
+        ["layers": [["image-name": "m.svg", "name": "m", "glass": false]], "shadow": ["kind": "neutral", "opacity": 0.5]],
         ["layers": (0..<3).reversed().map { ["image-name": "card\($0).svg", "name": "card\($0)"] },
          "shadow": ["kind": "neutral", "opacity": 0.5], "translucency": ["enabled": true, "value": 0.5]],
     ],
