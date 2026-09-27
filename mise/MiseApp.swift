@@ -1,7 +1,7 @@
 import SwiftUI
 import SwiftData
-#if os(iOS)
 import EventKit
+#if os(iOS)
 import WidgetKit
 #endif
 
@@ -10,8 +10,15 @@ struct MiseApp: App {
     let container = Storage.makeContainer()
     @State private var themeStore = ThemeStore()
     @State private var appLock = AppLock()
-    @State private var reminders = RemindersStore()
+    @State private var reminders: RemindersStore
+    @State private var calendar: CalendarStore
     @Environment(\.scenePhase) private var phase
+
+    init() {
+        let store = EKEventStore()  // one store per app (Apple guidance)
+        _reminders = State(initialValue: RemindersStore(eventStore: store))
+        _calendar = State(initialValue: CalendarStore(eventStore: store))
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -21,6 +28,7 @@ struct MiseApp: App {
                 .environment(themeStore)
                 .environment(appLock)
                 .environment(reminders)
+                .environment(calendar)
                 .onChange(of: phase, initial: true) { _, phase in
                     switch phase {
                     case .active:
