@@ -7,6 +7,8 @@ enum Storage {
     /// Adding a model? Also add it to `BackupService` export/restore (Backup.swift).
     static let models: [any PersistentModel.Type] = [
         Attachment.self,
+        Tag.self,
+        TaskExtras.self,
     ]
 
     /// `groupContainer: .none`: the default (.automatic) moves the store into

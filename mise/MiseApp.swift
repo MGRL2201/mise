@@ -7,7 +7,7 @@ import WidgetKit
 
 @main
 struct MiseApp: App {
-    let container = Storage.makeContainer()
+    let container: ModelContainer
     @State private var themeStore = ThemeStore()
     @State private var appLock = AppLock()
     @State private var reminders: RemindersStore
@@ -15,8 +15,9 @@ struct MiseApp: App {
     @Environment(\.scenePhase) private var phase
 
     init() {
+        container = Storage.makeContainer()
         let store = EKEventStore()  // one store per app (Apple guidance)
-        _reminders = State(initialValue: RemindersStore(eventStore: store))
+        _reminders = State(initialValue: RemindersStore(eventStore: store, context: container.mainContext))
         _calendar = State(initialValue: CalendarStore(eventStore: store))
     }
 

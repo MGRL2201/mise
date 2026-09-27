@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 @preconcurrency import EventKit
 #if !os(macOS)
 import UIKit
@@ -13,11 +14,14 @@ import UIKit
     var reminders: [EKReminder] = []
     var lists: [EKCalendar] = []
     private var refreshGeneration = 0
+    /// SwiftData context for TaskExtras cleanup after each refresh; nil skips it.
+    private let context: ModelContext?
 
     var hasAccess: Bool { status == .fullAccess }
 
-    init(eventStore: EKEventStore = EKEventStore()) {
+    init(eventStore: EKEventStore = EKEventStore(), context: ModelContext? = nil) {
         self.eventStore = eventStore
+        self.context = context
         status = EKEventStore.authorizationStatus(for: .reminder)
         let store = eventStore
         Task { [weak self] in
@@ -55,6 +59,13 @@ import UIKit
             case (.none, .some): return false
             default: return (lhs.title ?? "") < (rhs.title ?? "")
             }
+        }
+        guard let context else { return }
+        let store = eventStore
+        // Best-effort orphan cleanup; `exists` covers reminders outside the fetch window.
+        try? TaskExtras.reconcile(context, reminders: reminders.map { ($0.calendarItemIdentifier, $0.calendarItemExternalIdentifier) }) {
+            store.calendarItem(withIdentifier: $0.reminderID) != nil
+                || ($0.externalID.map { !$0.isEmpty && !store.calendarItems(withExternalIdentifier: $0).isEmpty } ?? false)
         }
     }
 
