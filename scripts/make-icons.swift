@@ -23,6 +23,7 @@ let palettes: [(String, [String])] = [
 ]
 // Glass: background gradient top/bottom, m stroke. Cards are translucent white.
 let glass = ["FBF7F2", "E3CDB4", "7A4E2D"]
+let cardAlpha = [0.4, 0.6, 0.8] // back → front, shared by .icon SVGs and preview
 
 let assets = URL(fileURLWithPath: "mise/Assets.xcassets")
 let cards: [CGPoint] = [CGPoint(x: 30, y: 22), CGPoint(x: 22, y: 30), CGPoint(x: 14, y: 38)] // back → front
@@ -61,7 +62,7 @@ func render(_ px: Int, _ c: [String], glassy: Bool = false) -> CGImage {
         let g = CGGradient(colorsSpace: srgb, colors: [color(c[0]), color(c[1])] as CFArray, locations: nil)!
         ctx.drawLinearGradient(g, start: .zero, end: CGPoint(x: 0, y: 120), options: [])
         for (i, o) in cards.enumerated() {
-            ctx.addPath(card(o)); ctx.setFillColor(color("FFFFFF", 0.3 + 0.15 * CGFloat(i))); ctx.fillPath()
+            ctx.addPath(card(o)); ctx.setFillColor(color("FFFFFF", cardAlpha[i])); ctx.fillPath()
             ctx.addPath(card(o)); ctx.setStrokeColor(color("FFFFFF", 0.9)); ctx.setLineWidth(1.2); ctx.strokePath()
         }
     } else {
@@ -119,7 +120,7 @@ func svg(_ body: String) -> Data {
     Data("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1024\" height=\"1024\" viewBox=\"0 0 120 120\">\(body)</svg>\n".utf8)
 }
 for (i, o) in cards.enumerated() {
-    write(svg("<rect x=\"\(Int(o.x))\" y=\"\(Int(o.y))\" width=\"76\" height=\"64\" rx=\"10\" fill=\"#FFFFFF\" fill-opacity=\"\(0.4 + 0.2 * Double(i))\"/>"),
+    write(svg("<rect x=\"\(Int(o.x))\" y=\"\(Int(o.y))\" width=\"76\" height=\"64\" rx=\"10\" fill=\"#FFFFFF\" fill-opacity=\"\(cardAlpha[i])\"/>"),
           icon.appendingPathComponent("Assets/card\(i).svg"))
 }
 write(svg("<path d=\"\(mPath)\" fill=\"none\" stroke=\"#\(glass[2])\" stroke-width=\"7\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>"),
