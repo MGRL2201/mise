@@ -13,6 +13,43 @@ struct TimeBlockTests {
         #expect(TimeBlock.title("Write", done: false) == "Write")
     }
 
+    private let calendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/New_York")!
+        return calendar
+    }()
+    private func at(_ day: Int, _ hour: Int, _ minute: Int = 0) -> Date {
+        calendar.date(from: DateComponents(year: 2026, month: 3, day: day, hour: hour, minute: minute))!
+    }
+
+    @Test func dropIntervalSnapsToHalfHourWithDefaultDuration() {
+        let h = TimelineLayout.hourHeight
+        let drop = TimeBlock.dropInterval(atY: (9 + 40.0 / 60) * h, dayStart: at(10, 0), calendar: calendar)
+        #expect(drop.start == at(10, 9, 30))
+        #expect(drop.duration == 30 * 60)
+        let late = TimeBlock.dropInterval(atY: 24 * h - 1, dayStart: at(10, 0), calendar: calendar)
+        #expect(late.start == at(10, 23, 30))
+        #expect(late.end == at(11, 0))
+        #expect(TimeBlock.dropInterval(atY: -20, dayStart: at(10, 0), calendar: calendar).start == at(10, 0))
+    }
+
+    @Test func unscheduledKeepsOpenUnlinkedTodayOverdueAndUndated() {
+        let store = EKEventStore()
+        func reminder(_ title: String, due: Date? = nil, done: Bool = false) -> EKReminder {
+            let r = EKReminder(eventStore: store)
+            r.title = title
+            r.dueDateComponents = due.map { calendar.dateComponents([.year, .month, .day, .hour, .minute], from: $0) }
+            r.isCompleted = done
+            return r
+        }
+        let now = at(10, 12)
+        let all = [reminder("undated"), reminder("today", due: at(10, 17)), reminder("upcoming", due: at(13, 9)),
+                   reminder("overdue", due: at(8, 9)), reminder("done", done: true), reminder("linked"),
+                   reminder("far", due: at(30, 9))]
+        let kept = TimeBlock.unscheduled(all, now: now, calendar: calendar) { $0.title == "linked" }
+        #expect(kept.map(\.title) == ["undated", "today", "overdue"])
+    }
+
     @Test(.enabled(if: EKEventStore.authorizationStatus(for: .event) == .fullAccess
                    && EKEventStore.authorizationStatus(for: .reminder) == .fullAccess))
     func timeBlockLinksCompletesAndDeletesThroughEventKit() throws {
