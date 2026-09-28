@@ -52,6 +52,10 @@ struct FreeSlotsTests {
         #expect(find(now: at(2, 19), days: 2) == [at(3, 9)])
     }
 
+    @Test func gapAfterEventRoundsUpToQuarterHour() {
+        #expect(find([DateInterval(start: at(2, 9), end: at(2, 10, 7))], now: at(2, 8), days: 1) == [at(2, 10, 15)])
+    }
+
     @Test func weekendSkipped() {
         #expect(find(now: at(7, 8), days: 3) == [at(9, 9)])
     }

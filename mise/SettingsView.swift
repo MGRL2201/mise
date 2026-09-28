@@ -28,7 +28,7 @@ struct SettingsView: View {
     @AppStorage(TravelTime.bufferKey) private var travelBuffer = 10
     @AppStorage(WorkingHours.startKey) private var workStart = WorkingHours.standard.start
     @AppStorage(WorkingHours.endKey) private var workEnd = WorkingHours.standard.end
-    @AppStorage(WorkingHours.daysKey) private var workDays = "23456"
+    @AppStorage(WorkingHours.daysKey) private var workDays = WorkingHours.digits(WorkingHours.standard.weekdays)
 
     /// Minutes after midnight as a time of day today.
     private func time(_ minutes: Binding<Int>) -> Binding<Date> {
@@ -48,7 +48,7 @@ struct SettingsView: View {
         } set: { on in
             var days = WorkingHours.weekdays(from: workDays)
             if on { days.insert(day) } else { days.remove(day) }
-            workDays = days.sorted().map(String.init).joined()
+            workDays = WorkingHours.digits(days)
         }
     }
 
@@ -153,6 +153,9 @@ struct SettingsView: View {
                 }
                 .toggleStyle(.button)
                 .buttonStyle(.bordered)  // separate tap targets inside a Form row
+                if workEnd <= workStart {
+                    Text("End must be after start, so no slots will be suggested.").foregroundStyle(.red)
+                }
             } header: {
                 Text("Working hours")
             } footer: {

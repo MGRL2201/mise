@@ -319,7 +319,15 @@ struct TasksView: View {
                 Button("Delete Task and Event", role: .destructive) { mutate { try store.delete(reminder, deletingEvent: true) } }
                 Button("Delete Task Only", role: .destructive) { mutate { try store.delete(reminder) } }
             }
-            .task { await store.refresh() }
+            .task {
+                await store.refresh()
+                #if DEBUG
+                // Screenshot hook: `-miseTab tasks -miseSuggest 1` opens the first open task with free-slot suggestions.
+                if UserDefaults.standard.bool(forKey: "miseSuggest"), let first = store.reminders.first(where: { !$0.isCompleted }) {
+                    editing = EditingReminder(reminder: first)
+                }
+                #endif
+            }
             .onAppear { visible = true }
             .onDisappear { visible = false; if dictation.isRecording { Task { _ = await dictation.stop() } } }
             // ponytail: day rollover only; timed reminders passing their due time mid-day don't turn red until the next re-render.

@@ -3,7 +3,7 @@ import SwiftData
 @preconcurrency import EventKit
 
 /// When the user works, for free-slot suggestions (SPEC §6.3). Minutes after midnight; Calendar weekdays (1 = Sunday).
-struct WorkingHours: Equatable {
+struct WorkingHours {
     static let startKey = "planning.workStart"
     static let endKey = "planning.workEnd"
     /// Weekday digits, e.g. "23456" = Mon–Fri.
@@ -22,17 +22,20 @@ struct WorkingHours: Equatable {
     }
 
     static func weekdays(from digits: String) -> Set<Int> { Set(digits.compactMap(\.wholeNumberValue)) }
+    static func digits(_ weekdays: Set<Int>) -> String { weekdays.sorted().map(String.init).joined() }
 }
 
 enum FreeSlots {
     /// Earliest `limit` slots of `duration` inside working hours over `days` days from today, one per free gap,
-    /// starting no earlier than `now` rounded up to the quarter hour.
+    /// starting on a quarter hour, no earlier than `now`.
     static func find(busy: [DateInterval], hours: WorkingHours, duration: TimeInterval, now: Date,
                      days: Int = 7, limit: Int = 3, calendar: Calendar = .current) -> [DateInterval] {
         guard duration > 0, hours.end > hours.start else { return [] }
         // Absolute quarter hours are local quarter hours: every time zone offset is a multiple of 15 minutes.
         let quarter: TimeInterval = 15 * 60
-        let earliest = Date(timeIntervalSinceReferenceDate: (now.timeIntervalSinceReferenceDate / quarter).rounded(.up) * quarter)
+        func up(_ date: Date) -> Date {
+            Date(timeIntervalSinceReferenceDate: (date.timeIntervalSinceReferenceDate / quarter).rounded(.up) * quarter)
+        }
         var merged: [DateInterval] = []
         for interval in busy.sorted(by: { $0.start < $1.start }) {
             if let last = merged.last, interval.start <= last.end {
@@ -43,16 +46,16 @@ enum FreeSlots {
         }
         var slots: [DateInterval] = []
         let today = calendar.startOfDay(for: now)
-        for offset in 0..<max(days, 0) where slots.count < limit {
+        for offset in 0..<days where slots.count < limit {
             guard let day = calendar.date(byAdding: .day, value: offset, to: today),
                   hours.weekdays.contains(calendar.component(.weekday, from: day)),
                   let open = calendar.date(bySettingHour: hours.start / 60, minute: hours.start % 60, second: 0, of: day),
                   let close = calendar.date(bySettingHour: hours.end / 60, minute: hours.end % 60, second: 0, of: day)
             else { continue }
-            var cursor = max(open, earliest)
+            var cursor = up(max(open, now))
             for interval in merged where interval.end > cursor && interval.start < close {
                 if interval.start.timeIntervalSince(cursor) >= duration { slots.append(DateInterval(start: cursor, duration: duration)) }
-                cursor = interval.end
+                cursor = up(interval.end)
             }
             if close.timeIntervalSince(cursor) >= duration { slots.append(DateInterval(start: cursor, duration: duration)) }
         }

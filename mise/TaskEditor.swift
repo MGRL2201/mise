@@ -203,6 +203,9 @@ struct TaskEditor: View {
     @State private var blockMinutes = 30
     @State private var blockCalendarID: String?
     @State private var loadedBlock: (start: Date, minutes: Int, calendarID: String?)?
+    @State private var estimate: Int?
+    @State private var loadedEstimate: Int?
+    @State private var suggestions: [DateInterval]?
 
     init(reminder: EKReminder) {
         self.reminder = reminder
@@ -288,12 +291,36 @@ struct TaskEditor: View {
                     }
                 }
                 Section("Time Block") {
+                    Picker("Estimate", selection: $estimate) {
+                        Text("None").tag(Int?.none)
+                        let options = [15, 30, 45, 60, 90, 120, 180]
+                        ForEach(options + (estimate.map { options.contains($0) ? [] : [$0] } ?? []), id: \.self) { minutes in
+                            Text(Duration.seconds(minutes * 60).formatted(.units(allowed: [.hours, .minutes], width: .abbreviated)))
+                                .tag(Optional(minutes))
+                        }
+                    }
+                    .pickerStyle(.menu)
                     if calendarStore.hasAccess {
                         Toggle("Time Block", isOn: $timeBlocked)
                         if timeBlocked {
                             DatePicker("Start", selection: $blockStart, displayedComponents: [.date, .hourAndMinute])
                             Stepper("Duration: \(Duration.seconds(blockMinutes * 60).formatted(.units(allowed: [.hours, .minutes], width: .abbreviated)))",
                                     value: $blockMinutes, in: 15...720, step: 15)
+                            Button("Suggest Free Slot") { suggest() }
+                            if let suggestions {
+                                if suggestions.isEmpty {
+                                    Text("No free slot in your working hours in the next 7 days.").foregroundStyle(.secondary)
+                                }
+                                ForEach(suggestions, id: \.self) { slot in
+                                    Button {
+                                        blockStart = slot.start
+                                        blockMinutes = Int(slot.duration / 60)
+                                        self.suggestions = nil
+                                    } label: {
+                                        Text("\(slot.start.formatted(.dateTime.weekday().month().day())), \(slot.start.formatted(date: .omitted, time: .shortened))–\(slot.end.formatted(date: .omitted, time: .shortened))")
+                                    }
+                                }
+                            }
                             Picker("Calendar", selection: $blockCalendarID) {
                                 Text("Default").tag(String?.none)
                                 ForEach(calendarStore.calendars.filter(\.allowsContentModifications), id: \.calendarIdentifier) { calendar in
@@ -429,7 +456,8 @@ struct TaskEditor: View {
                             try TaskExtras.write(in: modelContext, reminderID: reminder.calendarItemIdentifier,
                                                  externalID: reminder.calendarItemExternalIdentifier,
                                                  subtasks: subtasks, tagNames: tagNames,
-                                                 flagged: flagged != loadedFlagged ? flagged : nil, base: loadedSubtasks)
+                                                 flagged: flagged != loadedFlagged ? flagged : nil,
+                                                 estimateMinutes: estimate != loadedEstimate ? .some(estimate) : nil, base: loadedSubtasks)
                             if timeBlocked {
                                 if loadedBlock.map({ ($0.start, $0.minutes, $0.calendarID) != (blockStart, blockMinutes, blockCalendarID) }) ?? true {
                                     try createTimeBlock(for: reminder, start: blockStart, duration: TimeInterval(blockMinutes * 60),
@@ -454,6 +482,8 @@ struct TaskEditor: View {
                 flagged = extras?.flagged ?? false
                 loadedFlagged = flagged
                 tagNames = (extras?.tags ?? []).map(\.name).sorted()
+                estimate = extras?.estimateMinutes
+                loadedEstimate = estimate
                 if let event = store.linkedEvent(for: reminder) {
                     timeBlocked = true
                     blockStart = event.startDate
@@ -466,6 +496,12 @@ struct TaskEditor: View {
                         : Calendar.current.nextDate(after: .now, matching: DateComponents(minute: 0), matchingPolicy: .nextTime) ?? .now
                     blockCalendarID = calendarStore.defaultCalendar?.calendarIdentifier
                 }
+                #if DEBUG
+                if UserDefaults.standard.bool(forKey: "miseSuggest") {
+                    timeBlocked = true
+                    suggest()
+                }
+                #endif
             }
             .task {
                 if calendarStore.hasAccess && calendarStore.calendars.isEmpty { await calendarStore.refresh() }
@@ -493,6 +529,11 @@ struct TaskEditor: View {
     static func earlyLabel(_ seconds: TimeInterval) -> String {
         seconds == 30 * 86400 ? "1 month before"
             : Duration.seconds(seconds).formatted(.units(allowed: [.weeks, .days, .hours, .minutes], width: .wide)) + " before"
+    }
+
+    private func suggest() {
+        suggestions = suggestFreeSlots(duration: TimeInterval((estimate ?? blockMinutes) * 60), calendarStore: calendarStore,
+                                       context: modelContext, excludingEventID: store.linkedEvent(for: reminder)?.eventIdentifier)
     }
 
     private func hasTag(_ name: String) -> Bool {

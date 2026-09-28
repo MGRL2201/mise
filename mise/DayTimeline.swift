@@ -335,7 +335,7 @@ struct CalendarView: View {
         guard let reminder = reminders.reminders.first(where: { $0.calendarItemIdentifier == id }) else { return false }
         let estimate = (try? modelContext.fetch(FetchDescriptor<TaskExtras>())).flatMap {
             TaskExtras.match($0, id: id, externalID: reminder.calendarItemExternalIdentifier)?.estimateMinutes
-        }
+        }.flatMap { $0 > 0 ? $0 : nil }
         let duration = estimate.map { TimeInterval($0 * 60) } ?? TimeBlock.defaultDuration
         guard (try? createTimeBlock(for: reminder, start: start, duration: duration, calendar: nil,
                                     calendarStore: store, context: modelContext)) != nil
