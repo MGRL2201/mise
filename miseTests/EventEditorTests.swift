@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import EventKit
+import CoreLocation
 @testable import mise
 
 @MainActor
@@ -72,6 +73,49 @@ struct EventEditorTests {
         #expect(event.recurrenceRules?.first?.daysOfTheWeek?.count == 2)
         #expect(event.alarms?.count == 2)
         #expect(event.location == nil && event.url == nil && event.notes == nil)
+    }
+
+    @Test func pickedPlaceRoundTrips() {
+        let event = event()
+        var draft = EventDraft(event)
+        draft.location = "Apple Park"
+        draft.latitude = 37.3349
+        draft.longitude = -122.009
+        draft.apply(to: event, calendars: [])
+
+        #expect(event.location == "Apple Park")
+        #expect(event.structuredLocation?.title == "Apple Park")
+        #expect(event.structuredLocation?.geoLocation?.coordinate.latitude == 37.3349)
+        #expect(event.structuredLocation?.geoLocation?.coordinate.longitude == -122.009)
+        #expect(EventDraft(event) == draft)
+    }
+
+    @Test func removingPlaceClearsLocation() {
+        let event = event()
+        let place = EKStructuredLocation(title: "Apple Park")
+        place.geoLocation = CLLocation(latitude: 37.3349, longitude: -122.009)
+        event.structuredLocation = place
+        var draft = EventDraft(event)
+        #expect(draft.location == "Apple Park" && draft.latitude == 37.3349)
+        draft.location = ""
+        draft.latitude = nil
+        draft.longitude = nil
+        draft.apply(to: event, calendars: [])
+
+        #expect(event.location == nil || event.location == "")
+        #expect(event.structuredLocation?.geoLocation == nil)
+    }
+
+    @Test func unrelatedEditKeepsFreeTextLocation() {
+        let event = event()
+        event.location = "Room 4B, see Teams link"
+        var draft = EventDraft(event)
+        #expect(draft.location == "Room 4B, see Teams link" && draft.latitude == nil)
+        draft.title = "Standup"
+        draft.apply(to: event, calendars: [])
+
+        #expect(event.location == "Room 4B, see Teams link")
+        #expect(event.structuredLocation?.geoLocation == nil)
     }
 
     @Test func allDayToggleDropsDayRelativeAlarm() {
