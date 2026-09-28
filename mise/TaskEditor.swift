@@ -314,7 +314,7 @@ struct TaskEditor: View {
                                 ForEach(suggestions, id: \.self) { slot in
                                     Button {
                                         blockStart = slot.start
-                                        blockMinutes = Int(slot.duration / 60)
+                                        blockMinutes = min(720, max(15, Int(slot.duration / 60)))
                                         self.suggestions = nil
                                     } label: {
                                         Text("\(slot.start.formatted(.dateTime.weekday().month().day())), \(slot.start.formatted(date: .omitted, time: .shortened))–\(slot.end.formatted(date: .omitted, time: .shortened))")
@@ -482,7 +482,7 @@ struct TaskEditor: View {
                 flagged = extras?.flagged ?? false
                 loadedFlagged = flagged
                 tagNames = (extras?.tags ?? []).map(\.name).sorted()
-                estimate = extras?.estimateMinutes
+                estimate = extras?.estimateMinutes.flatMap { $0 > 0 ? $0 : nil }
                 loadedEstimate = estimate
                 if let event = store.linkedEvent(for: reminder) {
                     timeBlocked = true
@@ -506,6 +506,8 @@ struct TaskEditor: View {
             .task {
                 if calendarStore.hasAccess && calendarStore.calendars.isEmpty { await calendarStore.refresh() }
             }
+            .onChange(of: estimate) { suggestions = nil }
+            .onChange(of: blockMinutes) { suggestions = nil }
             .confirmationDialog("Delete this task?", isPresented: $confirmingDelete) {
                 if loadedBlock != nil {
                     Button("Delete Task and Event", role: .destructive) { mutate { try store.delete(reminder, deletingEvent: true) } }
