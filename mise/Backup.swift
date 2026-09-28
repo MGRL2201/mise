@@ -7,9 +7,9 @@ import UniformTypeIdentifiers
 // ponytail: base64 JSON inflates ~33% and loads fully in memory; switch to AppleArchive/streaming if backups get large
 struct Backup: Codable {
     static let currentVersion = 2
-    /// UserDefaults keys owned by ThemeStore / AppLock / CalendarStore / TravelTime.
+    /// UserDefaults keys owned by ThemeStore / AppLock / CalendarStore / TravelTime / WorkingHours.
     static let settingsKeys = ["theme.palette", "lock.mode", "lock.grace", "calendar.hidden", "calendar.colors", "calendar.default",
-                                "travel.transport", "travel.buffer"]
+                                "travel.transport", "travel.buffer", "planning.workStart", "planning.workEnd", "planning.workDays"]
 
     var version: Int
     var createdAt: Date
@@ -26,6 +26,7 @@ struct Backup: Codable {
         var tagNames: [String]
         var eventID: String?
         var flagged: Bool?  // optional: older v2 files lack it
+        var estimateMinutes: Int?  // optional: older files lack it
     }
 
     struct AttachmentRecord: Codable {
@@ -60,7 +61,7 @@ enum BackupService {
         let taskExtras = try context.fetch(FetchDescriptor<TaskExtras>()).map {
             Backup.TaskExtrasRecord(reminderID: $0.reminderID, externalID: $0.externalID,
                                     subtasks: $0.subtasks, tagNames: ($0.tags ?? []).map(\.name), eventID: $0.eventID,
-                                    flagged: $0.flagged)
+                                    flagged: $0.flagged, estimateMinutes: $0.estimateMinutes)
         }
         var settings: [String: Any] = [:]
         for key in Backup.settingsKeys { settings[key] = defaults.object(forKey: key) }
@@ -107,6 +108,7 @@ enum BackupService {
                     extras.subtasks = record.subtasks
                     extras.eventID = record.eventID
                     extras.flagged = record.flagged ?? false
+                    extras.estimateMinutes = record.estimateMinutes
                     context.insert(extras)
                     extras.tags = record.tagNames.compactMap { tagsByKey[key($0)] }
                 }

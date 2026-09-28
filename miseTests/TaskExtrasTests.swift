@@ -189,6 +189,29 @@ struct TaskExtrasTests {
         #expect(fresh.eventID == "e1")
     }
 
+    @Test func writeSetsKeepsAndClearsEstimate() throws {
+        let context = context()
+        try TaskExtras.write(in: context, reminderID: "r", externalID: nil, subtasks: [], tagNames: [], estimateMinutes: 45)
+        let row = try #require(try context.fetch(FetchDescriptor<TaskExtras>()).first)
+        #expect(row.estimateMinutes == 45)
+        try TaskExtras.write(in: context, reminderID: "r", externalID: nil, subtasks: [], tagNames: [])
+        #expect(row.estimateMinutes == 45)
+        try TaskExtras.write(in: context, reminderID: "r", externalID: nil, subtasks: [], tagNames: [], estimateMinutes: .some(nil))
+        #expect(row.estimateMinutes == nil)
+    }
+
+    @Test func reconcileMergeCarriesEstimate() throws {
+        let context = context()
+        let old = extras("old-id", "ext", in: context)
+        old.estimateMinutes = 20
+        let fresh = extras("new-id", nil, in: context)
+        try context.save()
+
+        try TaskExtras.reconcile(context, reminders: [(id: "new-id", externalID: "ext")], exists: { _ in false })
+
+        #expect(fresh.estimateMinutes == 20)
+    }
+
     // MARK: 3-way subtask merge
 
     private let a = Subtask(title: "a"), b = Subtask(title: "b"), c = Subtask(title: "c")

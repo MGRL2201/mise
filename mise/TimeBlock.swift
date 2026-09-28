@@ -12,7 +12,7 @@ enum TimeBlock {
         return done ? doneMark + bare : bare
     }
 
-    /// Length of a block made by dropping a task on the timeline; #30 estimates replace it.
+    /// Length of a block for a task with no estimate (TaskExtras.estimateMinutes).
     static let defaultDuration: TimeInterval = 30 * 60
 
     /// Block for a task dropped at `y` in the day column: the half hour containing it.

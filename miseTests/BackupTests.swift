@@ -115,7 +115,9 @@ extension BackupTests {
         extras.tags = [work]
         extras.eventID = "ev1"
         extras.flagged = true
+        extras.estimateMinutes = 45
         source.context.insert(extras)
+        source.defaults.set("246", forKey: WorkingHours.daysKey)
         try source.context.save()
 
         let target = try freshStore()
@@ -133,6 +135,8 @@ extension BackupTests {
         #expect(copy.tags?.map(\.name) == ["Work"])
         #expect(copy.eventID == "ev1")
         #expect(copy.flagged)
+        #expect(copy.estimateMinutes == 45)
+        #expect(target.defaults.string(forKey: WorkingHours.daysKey) == "246")
     }
 
     @Test func version1BackupStillRestores() throws {

@@ -49,6 +49,8 @@ final class TaskExtras {
     // losing the link; upgrade path = also store the event's calendarItemExternalIdentifier as fallback.
     var eventID: String?
     var flagged = false
+    /// Task length estimate in minutes (#30); sizes time blocks and free-slot suggestions.
+    var estimateMinutes: Int?
 
     init(reminderID: String, externalID: String?) {
         self.reminderID = reminderID
@@ -61,11 +63,12 @@ final class TaskExtras {
         return all.first { $0.externalID == externalID }
     }
 
-    /// Writes the editor's draft for a saved reminder: replaces tags (and flag, unless nil) on the matching row,
+    /// Writes the editor's draft for a saved reminder: replaces tags (and flag / estimate, unless nil) on the matching row,
     /// creating one only when there is something to store. Subtasks are 3-way merged against the
     /// stored ones when `base` (what the editor loaded) is given, else replaced. Saves.
     static func write(in context: ModelContext, reminderID: String, externalID: String?,
-                      subtasks: [Subtask], tagNames: [String], flagged: Bool? = nil, base: [Subtask]? = nil) throws {
+                      subtasks: [Subtask], tagNames: [String], flagged: Bool? = nil, estimateMinutes: Int?? = nil,
+                      base: [Subtask]? = nil) throws {
         var tags: [Tag] = []
         for name in tagNames {
             if let tag = try Tag.named(name, in: context), !tags.contains(where: { $0 === tag }) { tags.append(tag) }
@@ -73,7 +76,7 @@ final class TaskExtras {
         var row = match(try context.fetch(FetchDescriptor<TaskExtras>()), id: reminderID, externalID: externalID)
         let merged = if let base, let row { merge(base: base, mine: subtasks, theirs: row.subtasks) } else { subtasks }
         let subtasks = merged.filter { !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        if row == nil, !subtasks.isEmpty || !tags.isEmpty || flagged == true {
+        if row == nil, !subtasks.isEmpty || !tags.isEmpty || flagged == true || (estimateMinutes ?? nil) != nil {
             row = TaskExtras(reminderID: reminderID, externalID: externalID)
             context.insert(row!)
         }
@@ -83,6 +86,7 @@ final class TaskExtras {
             row.subtasks = subtasks
             row.tags = tags
             if let flagged { row.flagged = flagged }
+            if let estimateMinutes { row.estimateMinutes = estimateMinutes }
         }
         do { try context.save() } catch { context.rollback(); throw error }
     }
@@ -142,6 +146,7 @@ final class TaskExtras {
                     owner.subtasks += extras.subtasks
                     owner.eventID = owner.eventID ?? extras.eventID
                     owner.flagged = owner.flagged || extras.flagged
+                    owner.estimateMinutes = owner.estimateMinutes ?? extras.estimateMinutes
                     owner.tags = (owner.tags ?? []) + (extras.tags ?? []).filter { tag in
                         !(owner.tags ?? []).contains { $0 === tag }
                     }
