@@ -218,6 +218,7 @@ struct TaskEditor: View {
 
     var body: some View {
         NavigationStack {
+            ScrollViewReader { proxy in
             Form {
                 Section {
                     TextField("Title", text: $draft.title)
@@ -307,6 +308,7 @@ struct TaskEditor: View {
                             Stepper("Duration: \(Duration.seconds(blockMinutes * 60).formatted(.units(allowed: [.hours, .minutes], width: .abbreviated)))",
                                     value: $blockMinutes, in: 15...720, step: 15)
                             Button("Suggest Free Slot") { suggest() }
+                                .id("suggest")
                             if let suggestions {
                                 if suggestions.isEmpty {
                                     Text("No free slot in your working hours in the next 7 days.").foregroundStyle(.secondary)
@@ -499,13 +501,20 @@ struct TaskEditor: View {
                 #if DEBUG
                 if UserDefaults.standard.bool(forKey: "miseSuggest") {
                     timeBlocked = true
-                    suggest()
                 }
                 #endif
             }
             .task {
                 if calendarStore.hasAccess && calendarStore.calendars.isEmpty { await calendarStore.refresh() }
             }
+            #if DEBUG
+            .task {
+                guard UserDefaults.standard.bool(forKey: "miseSuggest") else { return }
+                suggest()
+                try? await Task.sleep(for: .milliseconds(300))
+                proxy.scrollTo("suggest", anchor: .top)
+            }
+            #endif
             .onChange(of: estimate) { suggestions = nil }
             .onChange(of: blockMinutes) { suggestions = nil }
             .confirmationDialog("Delete this task?", isPresented: $confirmingDelete) {
@@ -524,6 +533,7 @@ struct TaskEditor: View {
                 Button("OK") { errorMessage = nil }
             } message: { message in
                 Text(message)
+            }
             }
         }
     }
