@@ -165,6 +165,30 @@ struct TaskEditorTests {
         #expect((reminder.alarms ?? []).isEmpty)
     }
 
+    @Test func timedToDateOnlyDropsEarlyAlarm() {
+        let reminder = EKReminder(eventStore: EKEventStore())
+        var draft = TaskDraft(reminder)
+        draft.hasDueDate = true
+        draft.includesTime = true
+        draft.dueDate = dueDate()
+        draft.earlyReminder = 3600
+        draft.apply(to: reminder, lists: [])
+        draft = TaskDraft(reminder)
+        draft.includesTime = false
+        draft.apply(to: reminder, lists: [])
+        #expect((reminder.alarms ?? []).isEmpty)
+    }
+
+    @Test func earlyReminderNeedsTimedDue() {
+        let reminder = EKReminder(eventStore: EKEventStore())
+        var draft = TaskDraft(reminder)
+        draft.hasDueDate = true
+        draft.dueDate = dueDate()
+        draft.earlyReminder = 3600
+        draft.apply(to: reminder, lists: [])
+        #expect((reminder.alarms ?? []).isEmpty)
+    }
+
     @Test func earlyReminderNeedsDueDate() {
         let reminder = EKReminder(eventStore: EKEventStore())
         var draft = TaskDraft(reminder)
@@ -230,10 +254,9 @@ struct TaskEditorTests {
 
     @Test func untouchedEarlyReminderAndLocationSurviveTitleEdit() {
         let reminder = EKReminder(eventStore: EKEventStore())
+        reminder.dueDateComponents = DateComponents(year: 2030, month: 1, day: 2)
+        reminder.alarms = [EKAlarm(relativeOffset: -900)]  // date-only early alarm set elsewhere
         var draft = TaskDraft(reminder)
-        draft.hasDueDate = true
-        draft.dueDate = dueDate()
-        draft.earlyReminder = 900
         draft.location = LocationReminder(title: "Home", latitude: 1.3, longitude: 103.8, radius: 150, leaving: false)
         draft.apply(to: reminder, lists: [])
 

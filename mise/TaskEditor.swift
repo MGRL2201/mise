@@ -130,7 +130,8 @@ struct TaskDraft: Equatable {
             let oldDue = before.hasDueDate && before.includesTime ? before.dueDate : nil
             reminder.alarms = (reminder.alarms ?? []).filter { alarm in
                 if let date = alarm.absoluteDate { return date != oldDue }
-                if !hasDueDate && Self.isEarly(alarm) { return false }  // early reminders need a due
+                // Early reminders need a timed due; on a date-only due they'd fire relative to midnight.
+                if !(hasDueDate && includesTime) && Self.isEarly(alarm) { return false }
                 return alarm.proximity != .none || alarm.relativeOffset != 0
             } + (hasDueDate && includesTime ? [EKAlarm(relativeOffset: 0)] : [])
         }
@@ -156,7 +157,7 @@ struct TaskDraft: Equatable {
         }
         if earlyReminder != before.earlyReminder {
             reminder.alarms = (reminder.alarms ?? []).filter { !Self.isEarly($0) }
-                + (hasDueDate ? earlyReminder.map { [EKAlarm(relativeOffset: -$0)] } ?? [] : [])
+                + (hasDueDate && includesTime ? earlyReminder.map { [EKAlarm(relativeOffset: -$0)] } ?? [] : [])
         }
         if location != before.location {
             let old = (reminder.alarms ?? []).first { $0.structuredLocation != nil && $0.proximity != .none }
@@ -234,12 +235,13 @@ struct TaskEditor: View {
                         DatePicker("Date", selection: $draft.dueDate, displayedComponents: .date)
                     }
                     Toggle(isOn: Binding(get: { draft.hasDueDate && draft.includesTime }, set: {
+                        let wasDated = draft.hasDueDate
                         draft.includesTime = $0
                         if $0 {
                             draft.hasDueDate = true
                             let calendar = Calendar.current
                             let comps = calendar.dateComponents([.hour, .minute], from: draft.dueDate)
-                            if comps.hour == 0 && comps.minute == 0 {
+                            if !wasDated || comps.hour == 0 && comps.minute == 0 {
                                 let isToday = calendar.isDateInToday(draft.dueDate)
                                 let hour = isToday ? calendar.component(.hour, from: .now) + 1 : 9
                                 draft.dueDate = calendar.date(bySettingHour: min(hour, 23), minute: 0, second: 0, of: draft.dueDate) ?? draft.dueDate
@@ -274,6 +276,8 @@ struct TaskEditor: View {
                                            in: draft.dueDate..., displayedComponents: .date)
                             }
                         }
+                    }
+                    if draft.hasDueDate && draft.includesTime {
                         Picker(selection: $draft.earlyReminder) {
                             Text("None").tag(TimeInterval?.none)
                             let options = TaskDraft.earlyReminderOptions
@@ -342,6 +346,7 @@ struct TaskEditor: View {
                         .pickerStyle(.segmented)
                         .labelsHidden()
                         Button("Remove Location", role: .destructive) { draft.location = nil }
+                            .foregroundStyle(.red)
                     }
                 }
                 Section {
@@ -401,6 +406,7 @@ struct TaskEditor: View {
                 if !isNew {
                     Section {
                         Button("Delete Task", role: .destructive) { confirmingDelete = true }
+                            .foregroundStyle(.red)
                     }
                 }
             }

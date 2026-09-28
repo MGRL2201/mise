@@ -217,8 +217,9 @@ and documented here.
 ### 6.2 Tasks and reminders
 
 - Backed by **Apple Reminders via EventKit**: title, notes, due date/time,
-  priority, lists, recurrence (with end repeat date), URL, time alarms, early
-  reminders (relative alarms before the due time), completion. Two-way sync
+  priority, lists, recurrence (with end repeat date), time alarms, early
+  reminders (relative alarms before a timed due), completion. URL is an
+  EventKit field that Reminders.app may not show. Two-way sync
   with the Reminders app, including deletion in both directions. The editor
   follows the order of Reminders' Details screen.
 - **Location reminders:** arriving at or leaving a place picked via Apple Maps
