@@ -26,6 +26,31 @@ struct SettingsView: View {
     @State private var showingCalendarSettings = false
     @AppStorage(TravelTime.transportKey) private var travelTransport = TravelTime.Transport.driving
     @AppStorage(TravelTime.bufferKey) private var travelBuffer = 10
+    @AppStorage(WorkingHours.startKey) private var workStart = WorkingHours.standard.start
+    @AppStorage(WorkingHours.endKey) private var workEnd = WorkingHours.standard.end
+    @AppStorage(WorkingHours.daysKey) private var workDays = "23456"
+
+    /// Minutes after midnight as a time of day today.
+    private func time(_ minutes: Binding<Int>) -> Binding<Date> {
+        Binding {
+            Calendar.current.date(bySettingHour: minutes.wrappedValue / 60, minute: minutes.wrappedValue % 60, second: 0, of: .now) ?? .now
+        } set: {
+            let parts = Calendar.current.dateComponents([.hour, .minute], from: $0)
+            minutes.wrappedValue = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+        }
+    }
+
+    private var weekdayOrder: [Int] { (0..<7).map { (Calendar.current.firstWeekday - 1 + $0) % 7 + 1 } }
+
+    private func workday(_ day: Int) -> Binding<Bool> {
+        Binding {
+            WorkingHours.weekdays(from: workDays).contains(day)
+        } set: { on in
+            var days = WorkingHours.weekdays(from: workDays)
+            if on { days.insert(day) } else { days.remove(day) }
+            workDays = days.sorted().map(String.init).joined()
+        }
+    }
 
     var body: some View {
         @Bindable var lock = lock
@@ -114,6 +139,25 @@ struct SettingsView: View {
             }
             .onChange(of: travelTransport) { Task { await TravelTime.refresh(store: calendars, prompt: false) } }
             .onChange(of: travelBuffer) { Task { await TravelTime.refresh(store: calendars, prompt: false) } }
+            .listRowBackground(Color(theme.surface))
+
+            Section {
+                DatePicker("Start", selection: time($workStart), displayedComponents: .hourAndMinute)
+                DatePicker("End", selection: time($workEnd), displayedComponents: .hourAndMinute)
+                HStack {
+                    ForEach(weekdayOrder, id: \.self) { day in
+                        Toggle(Calendar.current.veryShortWeekdaySymbols[day - 1], isOn: workday(day))
+                            .accessibilityLabel(Calendar.current.weekdaySymbols[day - 1])
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .toggleStyle(.button)
+                .buttonStyle(.bordered)  // separate tap targets inside a Form row
+            } header: {
+                Text("Working hours")
+            } footer: {
+                Text("Used to suggest free slots for tasks.")
+            }
             .listRowBackground(Color(theme.surface))
 
             Section("On-device AI") {
