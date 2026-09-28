@@ -40,10 +40,12 @@ enum DailyPlanning {
         await LocalNotifications.replace(prefix: identifier, with: [UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)])
     }
 
-    /// Open, unblocked tasks that are overdue or due today, earliest due first.
-    static func tasks(_ reminders: [EKReminder], now: Date, calendar: Calendar = .current,
+    /// Open, unblocked tasks that are overdue or due today (`week`: or in the next 7 days), overdue first, then earliest due.
+    static func tasks(_ reminders: [EKReminder], week: Bool = false, now: Date, calendar: Calendar = .current,
                       isLinked: (EKReminder) -> Bool) -> [EKReminder] {
-        TimeBlock.unscheduled(reminders, now: now, calendar: calendar, isLinked: isLinked)
+        reminders
+            .filter { !$0.isCompleted && !isLinked($0)
+                && TaskGrouping.dueBucket($0.dueDateComponents, now: now, calendar: calendar).map { week || $0 != .upcoming } == true }
             .compactMap { reminder in reminder.dueDateComponents.flatMap(calendar.date(from:)).map { (reminder, $0) } }
             .sorted { lhs, rhs in
                 let lhsOverdue = TaskGrouping.dueBucket(lhs.0.dueDateComponents, now: now, calendar: calendar) == .overdue
@@ -59,10 +61,15 @@ enum DailyPlanning {
 @Observable final class PlanningPrompt {
     static let shared = PlanningPrompt()
     var isPresented = false
+    var isWeeklyReviewPresented = false
+    /// The two sheets hang off one view, so only one may be requested at a time.
+    func showDaily() { isWeeklyReviewPresented = false; isPresented = true }
+    func showWeekly() { isPresented = false; isWeeklyReviewPresented = true }
 }
 
-/// Pick today's tasks and block time for each from the free-slot suggestions.
+/// Pick today's (or, with `week`, the next 7 days') tasks and block time for each from the free-slot suggestions.
 struct PlanningView: View {
+    var week = false
     @Environment(RemindersStore.self) private var reminders
     @Environment(CalendarStore.self) private var calendarStore
     @Environment(\.modelContext) private var modelContext
@@ -77,7 +84,7 @@ struct PlanningView: View {
     var body: some View {
         NavigationStack {
             content
-                .navigationTitle("Plan Your Day")
+                .navigationTitle(week ? "Plan Your Week" : "Plan Your Day")
                 .toolbar {
                     ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
                 }
@@ -90,16 +97,17 @@ struct PlanningView: View {
     @ViewBuilder private var content: some View {
         // Read so a deleted linked event (refresh replaces events) lists its task again.
         let _ = calendarStore.events
-        let tasks = DailyPlanning.tasks(reminders.reminders, now: .now) { reminder in
+        let tasks = DailyPlanning.tasks(reminders.reminders, week: week, now: .now) { reminder in
             scheduled[reminder.calendarItemIdentifier] == nil && extra(reminder)?.eventID
                 .flatMap { calendarStore.eventStore.event(withIdentifier: $0) } != nil
         }
         if !reminders.hasAccess {
             ContentUnavailableView("No Reminders Access", systemImage: "checklist",
-                                   description: Text("Allow mise to access Reminders in Settings to plan your day."))
+                                   description: Text("Allow mise to access Reminders in Settings to plan your \(week ? "week" : "day")."))
         } else if tasks.isEmpty {
             ContentUnavailableView("Nothing to plan", systemImage: "checkmark.circle",
-                                   description: Text("No overdue or due-today tasks without a time block."))
+                                   description: Text(week ? "No overdue or due-this-week tasks without a time block."
+                                                         : "No overdue or due-today tasks without a time block."))
         } else {
             List(tasks, id: \.calendarItemIdentifier, rowContent: row)
         }
@@ -114,7 +122,7 @@ struct PlanningView: View {
                     Image(systemName: picked.contains(id) || slot != nil ? "checkmark.circle.fill" : "circle")
                     VStack(alignment: .leading) {
                         Text(reminder.title ?? "")
-                        due(reminder).font(.caption)
+                        Self.due(reminder, week: week).font(.caption)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -147,10 +155,14 @@ struct PlanningView: View {
         }
     }
 
-    private func due(_ reminder: EKReminder) -> Text {
+    static func due(_ reminder: EKReminder, week: Bool) -> Text {
         guard let components = reminder.dueDateComponents else { return Text("") }
         if TaskGrouping.dueBucket(components, now: .now, calendar: .current) == .overdue {
             return Text("Overdue").foregroundStyle(.red)
+        }
+        if week, let date = Calendar.current.date(from: components), !Calendar.current.isDateInToday(date) {
+            let format: Date.FormatStyle = components.hour == nil ? .dateTime.weekday(.wide) : .dateTime.weekday(.abbreviated).hour().minute()
+            return Text(date.formatted(format)).foregroundStyle(.secondary)
         }
         guard components.hour != nil, let date = Calendar.current.date(from: components) else {
             return Text("Today").foregroundStyle(.secondary)
