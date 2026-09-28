@@ -149,6 +149,15 @@ struct QuickAdd: Equatable {
         return result
     }
 
+    /// Dictation output to quick-add syntax: "9:30 p.m." -> "9:30pm", "hashtag bills" -> "#bills", trailing punctuation dropped.
+    static func fromSpeech(_ transcript: String) -> String {
+        transcript
+            .replacing(/\b(\d{1,2}(?::\d{2})?)\s*([ap])\.?\s?m(?:\.|\b)/.ignoresCase()) { "\($0.1)\($0.2.lowercased())m" }
+            .replacing(/\bhashtag\s+/.ignoresCase(), with: "#")
+            .replacing(/[\s.!?]+$/, with: "")
+            .trimmingCharacters(in: .whitespaces)
+    }
+
     /// Closest list for a mistyped `#name`: case/space-insensitive equal, prefix (3+ chars), or a small typo.
     static func closeMatch(_ name: String, in lists: [String]) -> String? {
         func normalized(_ s: String) -> [Character] { Array(s.lowercased().filter { !$0.isWhitespace }) }

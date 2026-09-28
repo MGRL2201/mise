@@ -54,6 +54,17 @@ struct QuickAddTests {
         }
     }
 
+    @Test func fromSpeechNormalizesDictation() {
+        let cases = [
+            ("Pay rent every 1st at 9 a.m. hashtag bills.", "Pay rent every 1st at 9am #bills"),
+            ("Call mom tomorrow 6 PM", "Call mom tomorrow 6pm"),
+            ("Dentist at 9:30 p.m.", "Dentist at 9:30pm"),
+            ("  Buy milk Hashtag groceries?  ", "Buy milk #groceries"),
+            ("Plain title", "Plain title"),
+        ]
+        for (input, expected) in cases { #expect(QuickAdd.fromSpeech(input) == expected) }
+    }
+
     @Test func closeMatchFindsTyposPrefixesAndCase() {
         let lists = ["Inbox", "Home Stuff", "Bills", "Groceries"]
         let cases: [(String, String?)] = [
