@@ -56,6 +56,34 @@ enum TimelineLayout {
     }
 }
 
+/// Pure helpers for the N-day grid (#24), N = 1...7.
+enum DayGrid {
+    static func clamp(_ count: Int) -> Int { min(max(count, 1), 7) }
+
+    /// Start-of-day dates of the visible columns.
+    static func visibleDays(from start: Date, count: Int, calendar: Calendar = .current) -> [Date] {
+        let first = calendar.startOfDay(for: start)
+        return (0..<clamp(count)).map { calendar.date(byAdding: .day, value: $0, to: first)! }
+    }
+
+    /// `start` moved by `pages` screens of `count` days.
+    static func page(_ start: Date, by pages: Int, count: Int, calendar: Calendar = .current) -> Date {
+        calendar.date(byAdding: .day, value: pages * clamp(count), to: start)!
+    }
+
+    /// Pinch out (zoom in) shows fewer days, pinch in shows more.
+    static func count(afterPinch scale: CGFloat, from count: Int) -> Int {
+        clamp(scale > 1.25 ? count - 1 : scale < 0.8 ? count + 1 : count)
+    }
+
+    /// Visible columns where `event` sits in the all-day row, matching DayColumn.split per day.
+    static func allDaySpan(_ event: EKEvent, days: [Date], calendar: Calendar = .current) -> ClosedRange<Int>? {
+        let hits = days.indices.filter { !DayColumn.split([event], day: days[$0], calendar: calendar).allDay.isEmpty }
+        guard let first = hits.first, let last = hits.last else { return nil }
+        return first...last
+    }
+}
+
 extension EKEvent {
     /// Chip in the all-day row rather than a timed block: flagged all-day, or spans the whole day.
     func showsAllDay(on dayStart: Date, calendar: Calendar = .current) -> Bool {
@@ -89,7 +117,7 @@ struct DayColumn: View {
                 let top = min(TimelineLayout.y(for: event.startDate, dayStart: day), 24 * TimelineLayout.hourHeight - 20)
                 let height = max(TimelineLayout.y(for: event.endDate, dayStart: day) - top, 20)
                 let width = geo.size.width / CGFloat(slot.columnCount)
-                EventBlock(event: event) { onSelect(event) }
+                EventBlock(event: event, compact: width < 80) { onSelect(event) }
                     .frame(width: width - 2, height: height - 1)
                     .offset(x: CGFloat(slot.column) * width, y: top)
             }
@@ -110,6 +138,8 @@ struct DayColumn: View {
 
 private struct EventBlock: View {
     let event: EKEvent
+    /// Narrow slot: clip to one line instead of wrapping per character.
+    let compact: Bool
     let action: () -> Void
 
     var body: some View {
@@ -118,12 +148,12 @@ private struct EventBlock: View {
             HStack(alignment: .top, spacing: 4) {
                 Rectangle().fill(event.color).frame(width: 3)
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(event.title ?? "").font(.caption.weight(.semibold))
-                    Text(times).font(.caption2).foregroundStyle(.secondary)
+                    Text(event.title ?? "").font(.caption.weight(.semibold)).fixedSize(horizontal: compact, vertical: compact)
+                    Text(times).font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: compact, vertical: compact)
                 }
                 Spacer(minLength: 0)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
             .background(event.color.opacity(0.25))
             .clipShape(.rect(cornerRadius: 4))
         }
@@ -157,11 +187,13 @@ struct HourGrid: View {
     }
 }
 
-/// Calendar tab: one day as a timeline, with all-day chips above.
+/// Calendar tab: 1-7 days side by side as a timeline, with all-day events above.
 struct CalendarView: View {
     @Environment(CalendarStore.self) private var store
     @Environment(\.openURL) private var openURL
+    /// First visible day.
     @State private var day = Calendar.current.startOfDay(for: .now)
+    @AppStorage("calendarDays") private var dayCount = 1
     @State private var selected: SelectedEvent?
 
     private struct SelectedEvent: Identifiable {
@@ -204,52 +236,61 @@ struct CalendarView: View {
     }
 
     private var isToday: Bool { Calendar.current.isDateInToday(day) }
+    private var count: Int { DayGrid.clamp(dayCount) }
+    private var days: [Date] { DayGrid.visibleDays(from: day, count: count) }
 
-    private func shift(_ days: Int) {
-        day = Calendar.current.date(byAdding: .day, value: days, to: day)!
+    private func shift(_ pages: Int) {
+        day = DayGrid.page(day, by: pages, count: count)
     }
 
+    private func select(_ event: EKEvent) { selected = SelectedEvent(event: event) }
+
     private var timeline: some View {
-        let allDay = DayColumn.split(store.events, day: day).allDay
+        let days = days
         return VStack(spacing: 8) {
             HStack {
-                Button("Previous Day", systemImage: "chevron.left") { shift(-1) }
-                Text(day, format: .dateTime.weekday(.abbreviated).month(.abbreviated).day())
-                    .font(.headline)
-                    .frame(minWidth: 110)
-                Button("Next Day", systemImage: "chevron.right") { shift(1) }
+                Button(count == 1 ? "Previous Day" : "Previous \(count) Days", systemImage: "chevron.left") { shift(-1) }
+                Group {
+                    if count == 1 {
+                        Text(day, format: .dateTime.weekday(.abbreviated).month(.abbreviated).day())
+                    } else {
+                        Text((day..<days.last!).formatted(.interval.month(.abbreviated).day()))
+                    }
+                }
+                .font(.headline)
+                .frame(minWidth: 110)
+                Button(count == 1 ? "Next Day" : "Next \(count) Days", systemImage: "chevron.right") { shift(1) }
                 Spacer()
+                Menu("Days Shown", systemImage: "calendar.day.timeline.left") {
+                    Picker("Days Shown", selection: $dayCount) {
+                        ForEach(1...7, id: \.self) { Text($0 == 1 ? "1 Day" : "\($0) Days").tag($0) }
+                    }
+                }
                 Button("Today") { day = Calendar.current.startOfDay(for: .now) }
                     .disabled(isToday)
             }
             .labelStyle(.iconOnly)
             .padding(.horizontal)
-            if !allDay.isEmpty {
-                ScrollView(.horizontal) {
-                    HStack {
-                        ForEach(allDay, id: \.rowID) { event in
-                            Button { selected = SelectedEvent(event: event) } label: {
-                                Text(event.title ?? "")
-                                    .font(.caption.weight(.semibold))
-                                    .lineLimit(1)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 4)
-                                    .background(event.color.opacity(0.25), in: .capsule)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.horizontal)
-                }
-                .scrollIndicators(.hidden)
+            if count == 1 {
+                allDayChips
+            } else {
+                dayHeaders(days)
+                allDayBars(days)
             }
             ScrollViewReader { proxy in
                 ScrollView {
                     ZStack(alignment: .topLeading) {
                         HourGrid()
-                        DayColumn(day: day, events: store.events) { selected = SelectedEvent(event: $0) }
-                            .padding(.leading, HourGrid.gutterWidth)
-                            .padding(.trailing, 4)
+                        HStack(spacing: 0) {
+                            ForEach(days, id: \.self) { day in
+                                DayColumn(day: day, events: store.events, onSelect: select)
+                                    .overlay(alignment: .leading) {
+                                        if day != days.first { Rectangle().fill(.separator).frame(width: 0.5) }
+                                    }
+                            }
+                        }
+                        .padding(.leading, HourGrid.gutterWidth)
+                        .padding(.trailing, 4)
                     }
                     .padding(.vertical, 8)
                 }
@@ -257,14 +298,98 @@ struct CalendarView: View {
                     let dx = drag.translation.width
                     if abs(dx) > 80 && abs(dx) > 2 * abs(drag.translation.height) { shift(dx < 0 ? 1 : -1) }
                 })
-                .onChange(of: day, initial: true) {
-                    store.range = DateInterval(start: day, end: Calendar.current.date(byAdding: .day, value: 1, to: day)!)
-                    let firstHour = DayColumn.split(store.events, day: day).timed.first
-                        .map { Calendar.current.component(.hour, from: max($0.startDate, day)) }
-                    let hour = isToday ? Calendar.current.component(.hour, from: .now) - 1 : min(firstHour ?? 8, 8)
+                .simultaneousGesture(MagnifyGesture().onEnded {
+                    dayCount = DayGrid.count(afterPinch: $0.magnification, from: count)
+                })
+                .onChange(of: days, initial: true) {
+                    store.range = DateInterval(start: day, end: DayGrid.page(day, by: 1, count: count))
+                    let firstHour = days.compactMap { day in
+                        DayColumn.split(store.events, day: day).timed.first
+                            .map { Calendar.current.component(.hour, from: max($0.startDate, day)) }
+                    }.min()
+                    let hour = days.contains(where: Calendar.current.isDateInToday)
+                        ? Calendar.current.component(.hour, from: .now) - 1 : min(firstHour ?? 8, 8)
                     proxy.scrollTo(max(hour, 0), anchor: .top)
                 }
             }
+        }
+    }
+
+    /// N = 1: the day's all-day events as a horizontal chip row.
+    @ViewBuilder
+    private var allDayChips: some View {
+        let allDay = DayColumn.split(store.events, day: day).allDay
+        if !allDay.isEmpty {
+            ScrollView(.horizontal) {
+                HStack {
+                    ForEach(allDay, id: \.rowID) { event in
+                        Button { select(event) } label: {
+                            Text(event.title ?? "")
+                                .font(.caption.weight(.semibold))
+                                .lineLimit(1)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .background(event.color.opacity(0.25), in: .capsule)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal)
+            }
+            .scrollIndicators(.hidden)
+        }
+    }
+
+    /// N > 1: weekday + day number above each column.
+    private func dayHeaders(_ days: [Date]) -> some View {
+        HStack(spacing: 0) {
+            ForEach(days, id: \.self) { day in
+                let today = Calendar.current.isDateInToday(day)
+                VStack(spacing: 0) {
+                    Text(day, format: .dateTime.weekday(.abbreviated)).font(.caption2).foregroundStyle(.secondary)
+                    Text(day, format: .dateTime.day())
+                        .font(.subheadline.weight(today ? .bold : .regular))
+                        .foregroundStyle(today ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .padding(.leading, HourGrid.gutterWidth)
+        .padding(.trailing, 4)
+    }
+
+    /// N > 1: one bar per all-day event across the columns it covers.
+    // ponytail: one row per event, no lane packing; capped at 3 rows then scrolls.
+    @ViewBuilder
+    private func allDayBars(_ days: [Date]) -> some View {
+        let bars = store.events.compactMap { event in DayGrid.allDaySpan(event, days: days).map { (event, $0) } }
+        if !bars.isEmpty {
+            let rowHeight: CGFloat = 22
+            ScrollView {
+                VStack(spacing: 0) {
+                    ForEach(bars, id: \.0.rowID) { event, span in
+                        GeometryReader { geo in
+                            let width = geo.size.width / CGFloat(days.count)
+                            Button { select(event) } label: {
+                                Text(event.title ?? "")
+                                    .font(.caption.weight(.semibold))
+                                    .lineLimit(1)
+                                    .padding(.horizontal, 6)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                                    .background(event.color.opacity(0.25), in: .rect(cornerRadius: 4))
+                            }
+                            .buttonStyle(.plain)
+                            .frame(width: width * CGFloat(span.count) - 2, height: rowHeight - 2)
+                            .offset(x: width * CGFloat(span.lowerBound))
+                        }
+                        .frame(height: rowHeight)
+                    }
+                }
+            }
+            .frame(height: rowHeight * CGFloat(min(bars.count, 3)))
+            .scrollIndicators(.hidden)
+            .padding(.leading, HourGrid.gutterWidth)
+            .padding(.trailing, 4)
         }
     }
 }
