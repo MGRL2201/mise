@@ -84,8 +84,19 @@ struct ContentView: View {
     @State private var morePath: [Destination] = []
     @State private var macSelection: Destination? = .today
     @Environment(AppLock.self) private var lock
+    private let planning = PlanningPrompt.shared
 
     var body: some View {
+        root
+            // Held back while the whole app is locked: a sheet would sit above the lock overlay.
+            .sheet(isPresented: Binding { planning.isPresented && !(lock.mode == .wholeApp && !lock.isUnlocked) }
+                   set: { planning.isPresented = $0 }) { PlanningView() }
+            #if DEBUG
+            .onAppear { if UserDefaults.standard.bool(forKey: "misePlanning") { planning.isPresented = true } }
+            #endif
+    }
+
+    @ViewBuilder private var root: some View {
         #if os(macOS)
         NavigationSplitView {
             List(Destination.allCases, selection: $macSelection) { destination in

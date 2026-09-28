@@ -2,6 +2,7 @@ import SwiftUI
 import AppIntents
 import SwiftData
 import EventKit
+import UserNotifications
 #if os(iOS)
 import WidgetKit
 #endif
@@ -22,6 +23,7 @@ struct MiseApp: App {
         let store = EKEventStore()  // one store per app (Apple guidance)
         _reminders = State(initialValue: RemindersStore(eventStore: store, context: container.mainContext))
         _calendar = State(initialValue: CalendarStore(eventStore: store))
+        UNUserNotificationCenter.current().delegate = NotificationRouter.shared  // before launch ends, so a cold-start tap arrives
     }
 
     var body: some Scene {
@@ -38,6 +40,7 @@ struct MiseApp: App {
                     case .active:
                         AutoBackup.run(context: container.mainContext)
                         Task { await TravelTime.refresh(store: calendar, prompt: true) }
+                        Task { await DailyPlanning.sync(prompt: false) }
                         #if os(iOS)
                         Self.recordSpikeLaunch()
                         #endif

@@ -291,6 +291,7 @@ struct TasksView: View {
                     }
                 }
                 if store.hasAccess {
+                    Button("Plan Day", systemImage: "sun.horizon") { PlanningPrompt.shared.isPresented = true }
                     Button("New Task", systemImage: "plus") { editing = EditingReminder(reminder: store.newReminder()) }
                         .disabled(parsing)
                 }
