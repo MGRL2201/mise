@@ -1,0 +1,265 @@
+import Testing
+import SwiftData
+import Foundation
+@testable import mise
+
+@MainActor
+struct TaskExtrasTests {
+    let container = try! ModelContainer(
+        for: Schema(Storage.models),
+        configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+    )
+
+    private func context() -> ModelContext { container.mainContext }
+
+    private func extras(_ id: String, _ externalID: String?, in context: ModelContext) -> TaskExtras {
+        let extras = TaskExtras(reminderID: id, externalID: externalID)
+        context.insert(extras)
+        return extras
+    }
+
+    @Test func matchPrefersIDThenExternalID() throws {
+        let context = context()
+        let byID = extras("a", "x", in: context)
+        let byExternal = extras("b", "y", in: context)
+        let blank = extras("c", "", in: context)
+        let all = [byExternal, blank, byID]
+
+        #expect(TaskExtras.match(all, id: "a", externalID: "y") === byID)
+        #expect(TaskExtras.match(all, id: "new", externalID: "y") === byExternal)
+        #expect(TaskExtras.match(all, id: "new", externalID: "") == nil)
+        #expect(TaskExtras.match(all, id: "new", externalID: nil) == nil)
+    }
+
+    @Test func reconcileKeepsRelinksAndDeletesAfterGrace() throws {
+        let context = context()
+        let tag = try #require(try mise.Tag.named("Work", in: context))
+        let listed = extras("listed", nil, in: context)
+        let moved = extras("old-id", "ext", in: context)
+        let gone = extras("gone", nil, in: context)
+        gone.tags = [tag]
+        let oldCompleted = extras("old-done", nil, in: context)
+        try context.save()
+        let reminders: [(id: String, externalID: String?)] = [(id: "listed", externalID: nil), (id: "new-id", externalID: "ext")]
+        let start = Date(timeIntervalSince1970: 1_000_000)
+
+        try TaskExtras.reconcile(context, reminders: reminders, now: start, exists: { $0.reminderID == "old-done" })
+
+        var left = try context.fetch(FetchDescriptor<TaskExtras>())
+        #expect(Set(left.map(\.reminderID)) == ["listed", "new-id", "old-done", "gone"])
+        #expect(moved.reminderID == "new-id")
+        #expect(gone.missingSince == start)
+        #expect(listed.missingSince == nil && oldCompleted.missingSince == nil)
+
+        try TaskExtras.reconcile(context, reminders: reminders, now: start + 8 * 86400,
+                                 exists: { $0.reminderID == "old-done" })
+
+        left = try context.fetch(FetchDescriptor<TaskExtras>())
+        #expect(Set(left.map(\.reminderID)) == ["listed", "new-id", "old-done"])
+        #expect(try context.fetch(FetchDescriptor<mise.Tag>()).map(\.name) == ["Work"])
+    }
+
+    @Test func reconcileClearsMissingSinceWhenSeenAgain() throws {
+        let context = context()
+        let row = extras("r", nil, in: context)
+        try TaskExtras.reconcile(context, reminders: [], exists: { _ in false })
+        #expect(row.missingSince != nil)
+        try TaskExtras.reconcile(context, reminders: [(id: "r", externalID: nil)], exists: { _ in false })
+        #expect(row.missingSince == nil)
+    }
+
+    @Test func reconcileEmptyListDeletesNothingOnFirstPass() throws {
+        let context = context()
+        _ = extras("a", nil, in: context)
+        _ = extras("b", "x", in: context)
+        try TaskExtras.reconcile(context, reminders: [], exists: { _ in false })
+        #expect(try context.fetch(FetchDescriptor<TaskExtras>()).count == 2)
+    }
+
+    @Test func reconcileMergesRelinkIntoExistingOwner() throws {
+        let context = context()
+        let work = try #require(try mise.Tag.named("Work", in: context))
+        let home = try #require(try mise.Tag.named("Home", in: context))
+        let old = extras("old-id", "ext", in: context)
+        old.subtasks = [Subtask(title: "old")]
+        old.tags = [work, home]
+        old.flagged = true
+        let fresh = extras("new-id", nil, in: context)
+        fresh.subtasks = [Subtask(title: "new")]
+        fresh.tags = [work]
+        try context.save()
+
+        try TaskExtras.reconcile(context, reminders: [(id: "new-id", externalID: "ext")], exists: { _ in false })
+
+        let left = try context.fetch(FetchDescriptor<TaskExtras>())
+        #expect(left.count == 1 && left.first === fresh)
+        #expect(fresh.subtasks.map(\.title) == ["new", "old"])
+        #expect(Set((fresh.tags ?? []).map(\.name)) == ["Work", "Home"])
+        #expect(fresh.flagged)
+    }
+
+    @Test func tagNamedTrimsAndIgnoresCase() throws {
+        let context = context()
+        #expect(try mise.Tag.named("  ", in: context) == nil)
+        let work = try #require(try mise.Tag.named("Work", in: context))
+        #expect(try mise.Tag.named(" work ", in: context) === work)
+        #expect(try context.fetch(FetchDescriptor<mise.Tag>()).count == 1)
+    }
+    @Test func writeCreatesUpdatesAndSkipsEmpty() throws {
+        let context = context()
+        try TaskExtras.write(in: context, reminderID: "none", externalID: nil, subtasks: [], tagNames: [])
+        #expect(try context.fetch(FetchDescriptor<TaskExtras>()).isEmpty)
+
+        let subtasks = [Subtask(title: "one"), Subtask(title: "two", done: true)]
+        try TaskExtras.write(in: context, reminderID: "r", externalID: "x", subtasks: subtasks, tagNames: ["Work", "Home"])
+        var rows = try context.fetch(FetchDescriptor<TaskExtras>())
+        #expect(rows.count == 1)
+        #expect(rows.first?.subtasks == subtasks)
+        #expect(Set((rows.first?.tags ?? []).map(\.name)) == ["Work", "Home"])
+
+        try TaskExtras.write(in: context, reminderID: "r2", externalID: "x", subtasks: [Subtask(title: "three")],
+                             tagNames: ["work", " Work "])
+        rows = try context.fetch(FetchDescriptor<TaskExtras>())
+        #expect(rows.count == 1)
+        #expect(rows.first?.reminderID == "r2")
+        #expect(rows.first?.subtasks.map(\.title) == ["three"])
+        #expect(rows.first?.tags?.map(\.name) == ["Work"])
+        #expect(try context.fetch(FetchDescriptor<mise.Tag>()).count == 2)
+    }
+
+    @Test func writeDropsBlankSubtasks() throws {
+        let context = context()
+        try TaskExtras.write(in: context, reminderID: "blank", externalID: nil, subtasks: [Subtask(title: "  ")], tagNames: [])
+        #expect(try context.fetch(FetchDescriptor<TaskExtras>()).isEmpty)
+
+        try TaskExtras.write(in: context, reminderID: "r", externalID: nil,
+                             subtasks: [Subtask(title: "keep"), Subtask(title: " \n")], tagNames: [])
+        #expect(try context.fetch(FetchDescriptor<TaskExtras>()).first?.subtasks.map(\.title) == ["keep"])
+    }
+
+    @Test func setEventIDCreatesUpdatesAndClears() throws {
+        let context = context()
+        try TaskExtras.setEventID(nil, in: context, reminderID: "none", externalID: nil)
+        #expect(try context.fetch(FetchDescriptor<TaskExtras>()).isEmpty)
+
+        try TaskExtras.setEventID("e1", in: context, reminderID: "r", externalID: "x")
+        var rows = try context.fetch(FetchDescriptor<TaskExtras>())
+        #expect(rows.count == 1 && rows.first?.eventID == "e1")
+
+        try TaskExtras.setEventID("e2", in: context, reminderID: "r2", externalID: "x")
+        rows = try context.fetch(FetchDescriptor<TaskExtras>())
+        #expect(rows.count == 1 && rows.first?.eventID == "e2")
+
+        try TaskExtras.setEventID(nil, in: context, reminderID: "r2", externalID: "x")
+        #expect(try context.fetch(FetchDescriptor<TaskExtras>()).first?.eventID == nil)
+    }
+
+    @Test func writeKeepsEventID() throws {
+        let context = context()
+        try TaskExtras.setEventID("e1", in: context, reminderID: "r", externalID: nil)
+        try TaskExtras.write(in: context, reminderID: "r", externalID: nil, subtasks: [Subtask(title: "one")], tagNames: [])
+        #expect(try context.fetch(FetchDescriptor<TaskExtras>()).first?.eventID == "e1")
+    }
+
+    @Test func toggleSubtaskFlipsDoneAndIgnoresUnknownID() throws {
+        let context = context()
+        let row = extras("r", nil, in: context)
+        let first = Subtask(title: "one")
+        row.subtasks = [first, Subtask(title: "two", done: true)]
+        try context.save()
+
+        try TaskExtras.toggleSubtask(first.id, in: row, context: context)
+        #expect(try ModelContext(container).fetch(FetchDescriptor<TaskExtras>()).first?.subtasks.map(\.done) == [true, true])
+        #expect(!context.hasChanges)
+
+        try TaskExtras.toggleSubtask(UUID(), in: row, context: context)
+        #expect(row.subtasks.map(\.done) == [true, true])
+    }
+
+    @Test func reconcileMergeCarriesEventID() throws {
+        let context = context()
+        let old = extras("old-id", "ext", in: context)
+        old.eventID = "e1"
+        let fresh = extras("new-id", nil, in: context)
+        try context.save()
+
+        try TaskExtras.reconcile(context, reminders: [(id: "new-id", externalID: "ext")], exists: { _ in false })
+
+        #expect(try context.fetch(FetchDescriptor<TaskExtras>()).count == 1)
+        #expect(fresh.eventID == "e1")
+    }
+
+    @Test func writeSetsKeepsAndClearsEstimate() throws {
+        let context = context()
+        try TaskExtras.write(in: context, reminderID: "r", externalID: nil, subtasks: [], tagNames: [], estimateMinutes: 45)
+        let row = try #require(try context.fetch(FetchDescriptor<TaskExtras>()).first)
+        #expect(row.estimateMinutes == 45)
+        try TaskExtras.write(in: context, reminderID: "r", externalID: nil, subtasks: [], tagNames: [])
+        #expect(row.estimateMinutes == 45)
+        try TaskExtras.write(in: context, reminderID: "r", externalID: nil, subtasks: [], tagNames: [], estimateMinutes: .some(nil))
+        #expect(row.estimateMinutes == nil)
+    }
+
+    @Test func reconcileMergeCarriesEstimate() throws {
+        let context = context()
+        let old = extras("old-id", "ext", in: context)
+        old.estimateMinutes = 20
+        let fresh = extras("new-id", nil, in: context)
+        try context.save()
+
+        try TaskExtras.reconcile(context, reminders: [(id: "new-id", externalID: "ext")], exists: { _ in false })
+
+        #expect(fresh.estimateMinutes == 20)
+    }
+
+    // MARK: 3-way subtask merge
+
+    private let a = Subtask(title: "a"), b = Subtask(title: "b"), c = Subtask(title: "c")
+
+    private func done(_ s: Subtask) -> Subtask { var s = s; s.done = true; return s }
+    private func renamed(_ s: Subtask, _ title: String) -> Subtask { var s = s; s.title = title; return s }
+
+    @Test func mergeKeepsCheckOffElsewhere() {
+        #expect(TaskExtras.merge(base: [a, b], mine: [a, b], theirs: [done(a), b]) == [done(a), b])
+    }
+
+    @Test func mergeKeepsMyRenameAndTheirCheckOff() {
+        #expect(TaskExtras.merge(base: [a], mine: [renamed(a, "A")], theirs: [done(a)]) == [done(renamed(a, "A"))])
+    }
+
+    @Test func mergeAppendsAdditionElsewhere() {
+        let mine = Subtask(title: "mine")
+        #expect(TaskExtras.merge(base: [a], mine: [a, mine], theirs: [c, a]) == [a, mine, c])
+    }
+
+    @Test func mergeMyDeleteWins() {
+        #expect(TaskExtras.merge(base: [a, b], mine: [b], theirs: [done(a), b]) == [b])
+    }
+
+    @Test func mergeTheirDeleteOfUntouchedWins() {
+        #expect(TaskExtras.merge(base: [a, b], mine: [a, b], theirs: [b]) == [b])
+        #expect(TaskExtras.merge(base: [a, b], mine: [renamed(a, "A"), b], theirs: [b]) == [renamed(a, "A"), b])
+    }
+
+    @Test func writeWithBaseMerges() throws {
+        let context = context()
+        try TaskExtras.write(in: context, reminderID: "r", externalID: nil, subtasks: [a, b], tagNames: [])
+        let row = try #require(try context.fetch(FetchDescriptor<TaskExtras>()).first)
+        try TaskExtras.toggleSubtask(a.id, in: row, context: context)  // checked off in the list while editing
+
+        try TaskExtras.write(in: context, reminderID: "r", externalID: nil, subtasks: [a, renamed(b, "B")],
+                             tagNames: [], base: [a, b])
+        #expect(row.subtasks == [done(a), renamed(b, "B")])
+    }
+
+    @Test func flaggedOnlyCreatesRowAndRoundTrips() throws {
+        let context = context()
+        try TaskExtras.write(in: context, reminderID: "r", externalID: nil, subtasks: [], tagNames: [], flagged: true)
+        let row = try #require(try context.fetch(FetchDescriptor<TaskExtras>()).first)
+        #expect(row.flagged)
+        try TaskExtras.write(in: context, reminderID: "r", externalID: nil, subtasks: [], tagNames: [], flagged: nil)
+        #expect(row.flagged)  // nil = untouched, so a flag set elsewhere survives
+        try TaskExtras.write(in: context, reminderID: "r", externalID: nil, subtasks: [], tagNames: [], flagged: false)
+        #expect(!row.flagged)
+    }
+}

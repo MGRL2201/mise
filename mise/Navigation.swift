@@ -84,8 +84,24 @@ struct ContentView: View {
     @State private var morePath: [Destination] = []
     @State private var macSelection: Destination? = .today
     @Environment(AppLock.self) private var lock
+    private let planning = PlanningPrompt.shared
 
     var body: some View {
+        root
+            // Held back while the whole app is locked: a sheet would sit above the lock overlay.
+            .sheet(isPresented: Binding { planning.isPresented && !(lock.mode == .wholeApp && !lock.isUnlocked) }
+                   set: { planning.isPresented = $0 }) { PlanningView() }
+            .sheet(isPresented: Binding { planning.isWeeklyReviewPresented && !(lock.mode == .wholeApp && !lock.isUnlocked) }
+                   set: { planning.isWeeklyReviewPresented = $0 }) { WeeklyReviewView() }
+            #if DEBUG
+            .onAppear {
+                if UserDefaults.standard.bool(forKey: "misePlanning") { planning.showDaily() }
+                if UserDefaults.standard.bool(forKey: "miseWeeklyReview") { planning.showWeekly() }
+            }
+            #endif
+    }
+
+    @ViewBuilder private var root: some View {
         #if os(macOS)
         NavigationSplitView {
             List(Destination.allCases, selection: $macSelection) { destination in
@@ -105,16 +121,19 @@ struct ContentView: View {
             guard let route = Route(url: url) else { return }
             macSelection = route.destination
         }
+        #if DEBUG
+        .onAppear { if let debugTab { macSelection = debugTab } }
+        #endif
         #else
         TabView(selection: $tab) {
             Tab("Today", systemImage: Destination.today.systemImage, value: .today) {
-                NavigationStack { PlaceholderView(destination: .today) }
+                NavigationStack { detailView(for: .today) }
             }
             Tab("Tasks", systemImage: Destination.tasks.systemImage, value: .tasks) {
-                NavigationStack { PlaceholderView(destination: .tasks) }
+                NavigationStack { detailView(for: .tasks) }
             }
             Tab("Calendar", systemImage: Destination.calendar.systemImage, value: .calendar) {
-                NavigationStack { PlaceholderView(destination: .calendar) }
+                NavigationStack { detailView(for: .calendar) }
             }
             Tab("Money", systemImage: Destination.money.systemImage, value: .money) {
                 NavigationStack { detailView(for: .money) }
@@ -128,6 +147,7 @@ struct ContentView: View {
                     }
                     .navigationTitle("More")
                     .themedBackground()
+                    .toolbarTitleDisplayMode(.inlineLarge)
                     .navigationDestination(for: Destination.self) { destination in
                         detailView(for: destination)
                     }
@@ -139,19 +159,36 @@ struct ContentView: View {
             guard let route = Route(url: url) else { return }
             select(route.destination)
         }
+        #if DEBUG
+        .onAppear { if let debugTab { select(debugTab) } }
+        #endif
         #endif
     }
 
-    @ViewBuilder
+    #if DEBUG
+    /// Screenshot hook: launch with `-miseTab calendar` to start on that destination.
+    private var debugTab: Destination? { UserDefaults.standard.string(forKey: "miseTab").flatMap(Destination.init) }
+    #endif
+
     private func detailView(for destination: Destination) -> some View {
-        if destination == .settings {
-            SettingsView()
-        } else if destination == .money && lock.mode == .financeAndNotes && !lock.isUnlocked {
-            // ponytail: Notes isn't gated; per-note lock (Phase 5, SPEC §6.5) will reuse AppLock.isUnlocked.
-            LockView()
-        } else {
-            PlaceholderView(destination: destination)
+        Group {
+            if destination == .settings {
+                SettingsView()
+            } else if destination == .tasks {
+                TasksView()
+            } else if destination == .calendar {
+                CalendarView()
+            } else if destination == .money && lock.mode == .financeAndNotes && !lock.isUnlocked {
+                // ponytail: Notes isn't gated; per-note lock (Phase 5, SPEC §6.5) will reuse AppLock.isUnlocked.
+                LockView()
+            } else {
+                PlaceholderView(destination: destination)
+            }
         }
+        #if !os(macOS)
+        // Title shares the toolbar row instead of sitting below an empty band (#131).
+        .toolbarTitleDisplayMode(.inlineLarge)
+        #endif
     }
 
     #if !os(macOS)

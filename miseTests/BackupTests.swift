@@ -104,3 +104,65 @@ struct BackupTests {
         #expect(target.files.read(for: old.id) == nil)
     }
 }
+
+extension BackupTests {
+    @Test func tagsAndTaskExtrasRoundTrip() throws {
+        let source = try freshStore()
+        let work = try #require(try mise.Tag.named("Work", in: source.context))
+        _ = try mise.Tag.named("Unused", in: source.context)
+        let extras = TaskExtras(reminderID: "r1", externalID: "e1")
+        extras.subtasks = [Subtask(title: "one", done: true), Subtask(title: "two"), Subtask(title: "three")]
+        extras.tags = [work]
+        extras.eventID = "ev1"
+        extras.flagged = true
+        extras.estimateMinutes = 45
+        source.context.insert(extras)
+        source.defaults.set("246", forKey: WorkingHours.daysKey)
+        try source.context.save()
+
+        let target = try freshStore()
+        target.context.insert(TaskExtras(reminderID: "stale", externalID: nil))
+        _ = try mise.Tag.named("Stale", in: target.context)
+        try target.context.save()
+        try restore(try export(source), into: target)
+
+        #expect(Set(try target.context.fetch(FetchDescriptor<mise.Tag>()).map(\.name)) == ["Work", "Unused"])
+        let restored = try target.context.fetch(FetchDescriptor<TaskExtras>())
+        let copy = try #require(restored.first)
+        #expect(restored.count == 1)
+        #expect(copy.reminderID == "r1" && copy.externalID == "e1")
+        #expect(copy.subtasks == extras.subtasks)
+        #expect(copy.tags?.map(\.name) == ["Work"])
+        #expect(copy.eventID == "ev1")
+        #expect(copy.flagged)
+        #expect(copy.estimateMinutes == 45)
+        #expect(target.defaults.string(forKey: WorkingHours.daysKey) == "246")
+    }
+
+    @Test func version1BackupStillRestores() throws {
+        let target = try freshStore()
+        let kept = try #require(try mise.Tag.named("Kept", in: target.context))
+        let extras = TaskExtras(reminderID: "r1", externalID: nil)
+        target.context.insert(extras)
+        extras.tags = [kept]
+        try target.context.save()
+        let settings = try PropertyListSerialization.data(fromPropertyList: [String: Any](), format: .binary, options: 0)
+        let json = #"{"version":1,"createdAt":0,"attachments":[],"settings":"\#(settings.base64EncodedString())"}"#
+        try restore(Data(json.utf8), into: target)
+        #expect(try target.context.fetch(FetchDescriptor<mise.Tag>()).map(\.name) == ["Kept"])
+        let left = try target.context.fetch(FetchDescriptor<TaskExtras>())
+        #expect(left.map(\.reminderID) == ["r1"] && left.first?.tags?.map(\.name) == ["Kept"])
+    }
+
+    @Test func duplicateTagNamesRestoreAsOneTag() throws {
+        let target = try freshStore()
+        let settings = try PropertyListSerialization.data(fromPropertyList: [String: Any](), format: .binary, options: 0)
+        let backup = Backup(version: 2, createdAt: .now, attachments: [], settings: settings,
+                            tags: ["Work", " work "],
+                            taskExtras: [.init(reminderID: "r1", externalID: nil, subtasks: [], tagNames: ["WORK"])])
+        try restore(try JSONEncoder().encode(backup), into: target)
+        let tags = try target.context.fetch(FetchDescriptor<mise.Tag>())
+        #expect(tags.map(\.name) == ["Work"])
+        #expect(try target.context.fetch(FetchDescriptor<TaskExtras>()).first?.tags?.first === tags.first)
+    }
+}

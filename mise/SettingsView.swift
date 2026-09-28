@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct SettingsView: View {
     @Environment(ThemeStore.self) private var store
     @Environment(AppLock.self) private var lock
+    @Environment(CalendarStore.self) private var calendars
     @Environment(\.theme) private var theme
     @State private var editingDark = false
     @State private var stockAPIKeyInput = ""
@@ -22,6 +23,39 @@ struct SettingsView: View {
     @AppStorage(AutoBackup.lastErrorKey) private var autoBackupError: String?
     @State private var autoBackupFolder = AutoBackup.folderURL()?.lastPathComponent
     @State private var isPickingFolder = false
+    @State private var showingCalendarSettings = false
+    @AppStorage(TravelTime.transportKey) private var travelTransport = TravelTime.Transport.driving
+    @AppStorage(TravelTime.bufferKey) private var travelBuffer = 10
+    @AppStorage(WorkingHours.startKey) private var workStart = WorkingHours.standard.start
+    @AppStorage(WorkingHours.endKey) private var workEnd = WorkingHours.standard.end
+    @AppStorage(WorkingHours.daysKey) private var workDays = WorkingHours.digits(WorkingHours.standard.weekdays)
+    @AppStorage(DailyPlanning.enabledKey) private var dailyPlanning = false
+    @AppStorage(DailyPlanning.timeKey) private var dailyPlanningTime = DailyPlanning.defaultTime
+    @AppStorage(WeeklyReview.enabledKey) private var weeklyReview = false
+    @AppStorage(WeeklyReview.dayKey) private var weeklyReviewDay = WeeklyReview.defaultDay
+    @AppStorage(WeeklyReview.timeKey) private var weeklyReviewTime = WeeklyReview.defaultTime
+
+    /// Minutes after midnight as a time of day today.
+    private func time(_ minutes: Binding<Int>) -> Binding<Date> {
+        Binding {
+            Calendar.current.date(bySettingHour: minutes.wrappedValue / 60, minute: minutes.wrappedValue % 60, second: 0, of: .now) ?? .now
+        } set: {
+            let parts = Calendar.current.dateComponents([.hour, .minute], from: $0)
+            minutes.wrappedValue = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+        }
+    }
+
+    private var weekdayOrder: [Int] { (0..<7).map { (Calendar.current.firstWeekday - 1 + $0) % 7 + 1 } }
+
+    private func workday(_ day: Int) -> Binding<Bool> {
+        Binding {
+            WorkingHours.weekdays(from: workDays).contains(day)
+        } set: { on in
+            var days = WorkingHours.weekdays(from: workDays)
+            if on { days.insert(day) } else { days.remove(day) }
+            workDays = WorkingHours.digits(days)
+        }
+    }
 
     var body: some View {
         @Bindable var lock = lock
@@ -85,6 +119,85 @@ struct SettingsView: View {
                     .disabled(!stockAPIKeySaved)
                 }
             }
+            .listRowBackground(Color(theme.surface))
+
+            Section("Calendar") {
+                #if os(iOS)
+                NavigationLink("Calendars") { CalendarSettingsView() }
+                #else
+                // Mac detail column has no NavigationStack to push onto.
+                Button("Calendars…") { showingCalendarSettings = true }
+                    .sheet(isPresented: $showingCalendarSettings) { CalendarSettingsSheet() }
+                #endif
+            }
+            .listRowBackground(Color(theme.surface))
+
+            Section {
+                Picker("Travel by", selection: $travelTransport) {
+                    ForEach(TravelTime.Transport.allCases, id: \.self) { Text($0.title) }
+                }
+                Stepper("Leave \(travelBuffer) min early", value: $travelBuffer, in: 0...120, step: 5)
+            } header: {
+                Text("Leave-now alerts")
+            } footer: {
+                Text("Travel time is refreshed when the app opens and when iOS runs background refresh, so it can be out of date.")
+            }
+            .onChange(of: travelTransport) { Task { await TravelTime.refresh(store: calendars, prompt: false) } }
+            .onChange(of: travelBuffer) { Task { await TravelTime.refresh(store: calendars, prompt: false) } }
+            .listRowBackground(Color(theme.surface))
+
+            Section {
+                DatePicker("Start", selection: time($workStart), displayedComponents: .hourAndMinute)
+                DatePicker("End", selection: time($workEnd), displayedComponents: .hourAndMinute)
+                HStack {
+                    ForEach(weekdayOrder, id: \.self) { day in
+                        Toggle(Calendar.current.veryShortWeekdaySymbols[day - 1], isOn: workday(day))
+                            .accessibilityLabel(Calendar.current.weekdaySymbols[day - 1])
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .toggleStyle(.button)
+                .buttonStyle(.bordered)  // separate tap targets inside a Form row
+                if workEnd <= workStart {
+                    Text("End must be after start, so no slots will be suggested.").foregroundStyle(.red)
+                }
+            } header: {
+                Text("Working hours")
+            } footer: {
+                Text("Used to suggest free slots for tasks.")
+            }
+            .listRowBackground(Color(theme.surface))
+
+            Section {
+                Toggle("Plan your day reminder", isOn: $dailyPlanning)
+                if dailyPlanning {
+                    DatePicker("Time", selection: time($dailyPlanningTime), displayedComponents: .hourAndMinute)
+                }
+            } header: {
+                Text("Daily planning")
+            } footer: {
+                Text("A notification each day that opens a screen to pick today's tasks and schedule them.")
+            }
+            .onChange(of: dailyPlanning) { Task { await DailyPlanning.sync(prompt: true) } }
+            .onChange(of: dailyPlanningTime) { Task { await DailyPlanning.sync(prompt: true) } }
+            .listRowBackground(Color(theme.surface))
+
+            Section {
+                Toggle("Weekly review reminder", isOn: $weeklyReview)
+                if weeklyReview {
+                    Picker("Day", selection: $weeklyReviewDay) {
+                        ForEach(weekdayOrder, id: \.self) { Text(Calendar.current.weekdaySymbols[$0 - 1]).tag($0) }
+                    }
+                    DatePicker("Time", selection: time($weeklyReviewTime), displayedComponents: .hourAndMinute)
+                }
+            } header: {
+                Text("Weekly review")
+            } footer: {
+                Text("A notification each week that opens a review of the past 7 days and lets you plan the next.")
+            }
+            .onChange(of: weeklyReview) { Task { await WeeklyReview.sync(prompt: true) } }
+            .onChange(of: weeklyReviewDay) { Task { await WeeklyReview.sync(prompt: true) } }
+            .onChange(of: weeklyReviewTime) { Task { await WeeklyReview.sync(prompt: true) } }
             .listRowBackground(Color(theme.surface))
 
             Section("On-device AI") {
@@ -223,6 +336,7 @@ struct SettingsView: View {
                 Data(contentsOf: url), context: modelContext, files: AttachmentFileStore(), defaults: .standard)
             store.reload()
             lock.reload()
+            calendars.reloadSettings()
         } catch {
             backupError = error.localizedDescription
         }

@@ -1,16 +1,30 @@
 import SwiftUI
+import AppIntents
 import SwiftData
-#if os(iOS)
 import EventKit
+import UserNotifications
+#if os(iOS)
 import WidgetKit
 #endif
 
 @main
 struct MiseApp: App {
-    let container = Storage.makeContainer()
+    let container: ModelContainer
     @State private var themeStore = ThemeStore()
     @State private var appLock = AppLock()
+    @State private var reminders: RemindersStore
+    @State private var calendar: CalendarStore
     @Environment(\.scenePhase) private var phase
+
+    init() {
+        let container = Storage.makeContainer()
+        self.container = container
+        AppDependencyManager.shared.add(dependency: container)  // CompleteTaskIntent
+        let store = EKEventStore()  // one store per app (Apple guidance)
+        _reminders = State(initialValue: RemindersStore(eventStore: store, context: container.mainContext))
+        _calendar = State(initialValue: CalendarStore(eventStore: store))
+        UNUserNotificationCenter.current().delegate = NotificationRouter.shared  // before launch ends, so a cold-start tap arrives
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -19,15 +33,22 @@ struct MiseApp: App {
                 .modifier(ThemeRoot())
                 .environment(themeStore)
                 .environment(appLock)
+                .environment(reminders)
+                .environment(calendar)
                 .onChange(of: phase, initial: true) { _, phase in
                     switch phase {
                     case .active:
                         AutoBackup.run(context: container.mainContext)
+                        Task { await TravelTime.refresh(store: calendar, prompt: true) }
+                        Task { await DailyPlanning.sync(prompt: false) }
+                        Task { await WeeklyReview.sync(prompt: false) }
                         #if os(iOS)
                         Self.recordSpikeLaunch()
                         #endif
                     #if os(iOS)
-                    case .background: AutoBackup.scheduleRefresh()
+                    case .background:
+                        AutoBackup.scheduleRefresh()
+                        TravelTime.scheduleRefresh()
                     #endif
                     default: break
                     }
@@ -40,6 +61,10 @@ struct MiseApp: App {
                 AutoBackup.run(context: container.mainContext)
                 AutoBackup.scheduleRefresh()
             }
+        }
+        .backgroundTask(.appRefresh(TravelTime.taskID)) { [calendar] in
+            await TravelTime.refresh(store: calendar, prompt: false)
+            await TravelTime.scheduleRefresh()
         }
         #endif
     }

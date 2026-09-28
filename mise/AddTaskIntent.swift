@@ -1,20 +1,70 @@
 import AppIntents
+import EventKit
 import Foundation
+import SwiftData
 
-/// Spike #12: Siri / Shortcuts add-task. String params can't appear in App
-/// Shortcut phrases, so Siri asks for the title as a follow-up.
+/// Siri / Shortcuts add-task. String params can't appear in App Shortcut
+/// phrases, so Siri asks for the title as a follow-up.
 struct AddTaskIntent: AppIntent {
     static let title: LocalizedStringResource = "Add Task"
-    static let storeKey = "spike.siriTasks"
 
     @Parameter(title: "Task", requestValueDialog: "What's the task?")
     var title: String
 
-    func perform() async throws -> some IntentResult & ProvidesDialog {
-        // ponytail: spike store; real add goes to Reminders (EventKit) in the Tasks phase
-        let defaults = UserDefaults.standard
-        defaults.set((defaults.stringArray(forKey: Self.storeKey) ?? []) + [title], forKey: Self.storeKey)
-        return .result(dialog: "Added \(title) to mise.")
+    @Parameter(title: "Due Date")
+    var due: Date?
+
+    @MainActor func perform() async throws -> some IntentResult & ProvidesDialog {
+        guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return .result(dialog: "What's the task? Give it a title.")
+        }
+        let store = RemindersStore()
+        if store.status == .notDetermined { await store.requestAccess() }
+        guard store.hasAccess else {
+            return .result(dialog: "mise needs Reminders access. Open mise and allow access to Reminders.")
+        }
+        let writable = store.eventStore.calendars(for: .reminder).filter(\.allowsContentModifications)
+        var q = QuickAdd.parse(title, lists: writable.map(\.title), now: .now)
+        guard !q.title.isEmpty else {
+            return .result(dialog: "What's the task? Give it a title.")
+        }
+        // Siri can't ask "Did you mean", so take the close match; no list creation from Siri.
+        if q.listName == nil, let n = q.unknownList { q.listName = QuickAdd.closeMatch(n, in: writable.map(\.title)) }
+        if let due {
+            q.due = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: due)
+            q.recurrence = .none  // a parsed rule would repeat on the overridden date
+        }
+        let r = store.newReminder()
+        q.apply(to: r, lists: writable)
+        try store.save(r)
+        return .result(dialog: "Added \(q.title) to mise.")
+    }
+}
+
+/// Marks a reminder done by identifier. Plumbing for widget buttons (#77), not a user-facing Shortcut.
+struct CompleteTaskIntent: AppIntent {
+    static let title: LocalizedStringResource = "Complete Task"
+    static let isDiscoverable = false
+
+    @Parameter(title: "Task ID")
+    var reminderID: String
+
+    @Dependency var container: ModelContainer
+
+    init() {}
+    init(reminderID: String) { self.reminderID = reminderID }
+
+    @MainActor func perform() async throws -> some IntentResult & ProvidesDialog {
+        let store = RemindersStore(context: container.mainContext)  // context so the linked time-block title updates
+        if store.status == .notDetermined { await store.requestAccess() }
+        guard store.hasAccess else {
+            return .result(dialog: "mise needs Reminders access. Open mise and allow access to Reminders.")
+        }
+        guard let r = store.eventStore.calendarItem(withIdentifier: reminderID) as? EKReminder else {
+            return .result(dialog: "That task no longer exists.")
+        }
+        try store.setCompleted(r, true)
+        return .result(dialog: "Completed \(r.title ?? "task").")
     }
 }
 
