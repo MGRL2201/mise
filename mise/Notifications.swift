@@ -29,8 +29,12 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate {
     static let shared = NotificationRouter()
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        guard response.notification.request.identifier.hasPrefix(DailyPlanning.identifier) else { return }
-        await MainActor.run { PlanningPrompt.shared.isPresented = true }
+        let id = response.notification.request.identifier
+        if id.hasPrefix(DailyPlanning.identifier) {
+            await MainActor.run { PlanningPrompt.shared.showDaily() }
+        } else if id.hasPrefix(WeeklyReview.identifier) {
+            await MainActor.run { PlanningPrompt.shared.showWeekly() }
+        }
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,

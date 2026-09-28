@@ -91,8 +91,13 @@ struct ContentView: View {
             // Held back while the whole app is locked: a sheet would sit above the lock overlay.
             .sheet(isPresented: Binding { planning.isPresented && !(lock.mode == .wholeApp && !lock.isUnlocked) }
                    set: { planning.isPresented = $0 }) { PlanningView() }
+            .sheet(isPresented: Binding { planning.isWeeklyReviewPresented && !(lock.mode == .wholeApp && !lock.isUnlocked) }
+                   set: { planning.isWeeklyReviewPresented = $0 }) { WeeklyReviewView() }
             #if DEBUG
-            .onAppear { if UserDefaults.standard.bool(forKey: "misePlanning") { planning.isPresented = true } }
+            .onAppear {
+                if UserDefaults.standard.bool(forKey: "misePlanning") { planning.showDaily() }
+                if UserDefaults.standard.bool(forKey: "miseWeeklyReview") { planning.showWeekly() }
+            }
             #endif
     }
 

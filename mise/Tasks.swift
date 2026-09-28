@@ -291,7 +291,8 @@ struct TasksView: View {
                     }
                 }
                 if store.hasAccess {
-                    Button("Plan Day", systemImage: "sun.horizon") { PlanningPrompt.shared.isPresented = true }
+                    Button("Plan Day", systemImage: "sun.horizon") { PlanningPrompt.shared.showDaily() }
+                    Button("Weekly Review", systemImage: "calendar.badge.clock") { PlanningPrompt.shared.showWeekly() }
                     Button("New Task", systemImage: "plus") { editing = EditingReminder(reminder: store.newReminder()) }
                         .disabled(parsing)
                 }

@@ -31,6 +31,9 @@ struct SettingsView: View {
     @AppStorage(WorkingHours.daysKey) private var workDays = WorkingHours.digits(WorkingHours.standard.weekdays)
     @AppStorage(DailyPlanning.enabledKey) private var dailyPlanning = false
     @AppStorage(DailyPlanning.timeKey) private var dailyPlanningTime = DailyPlanning.defaultTime
+    @AppStorage(WeeklyReview.enabledKey) private var weeklyReview = false
+    @AppStorage(WeeklyReview.dayKey) private var weeklyReviewDay = WeeklyReview.defaultDay
+    @AppStorage(WeeklyReview.timeKey) private var weeklyReviewTime = WeeklyReview.defaultTime
 
     /// Minutes after midnight as a time of day today.
     private func time(_ minutes: Binding<Int>) -> Binding<Date> {
@@ -177,6 +180,24 @@ struct SettingsView: View {
             }
             .onChange(of: dailyPlanning) { Task { await DailyPlanning.sync(prompt: true) } }
             .onChange(of: dailyPlanningTime) { Task { await DailyPlanning.sync(prompt: true) } }
+            .listRowBackground(Color(theme.surface))
+
+            Section {
+                Toggle("Weekly review reminder", isOn: $weeklyReview)
+                if weeklyReview {
+                    Picker("Day", selection: $weeklyReviewDay) {
+                        ForEach(weekdayOrder, id: \.self) { Text(Calendar.current.weekdaySymbols[$0 - 1]).tag($0) }
+                    }
+                    DatePicker("Time", selection: time($weeklyReviewTime), displayedComponents: .hourAndMinute)
+                }
+            } header: {
+                Text("Weekly review")
+            } footer: {
+                Text("A notification each week that opens a review of the past 7 days and lets you plan the next.")
+            }
+            .onChange(of: weeklyReview) { Task { await WeeklyReview.sync(prompt: true) } }
+            .onChange(of: weeklyReviewDay) { Task { await WeeklyReview.sync(prompt: true) } }
+            .onChange(of: weeklyReviewTime) { Task { await WeeklyReview.sync(prompt: true) } }
             .listRowBackground(Color(theme.surface))
 
             Section("On-device AI") {
