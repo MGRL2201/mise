@@ -29,6 +29,8 @@ struct SettingsView: View {
     @AppStorage(WorkingHours.startKey) private var workStart = WorkingHours.standard.start
     @AppStorage(WorkingHours.endKey) private var workEnd = WorkingHours.standard.end
     @AppStorage(WorkingHours.daysKey) private var workDays = WorkingHours.digits(WorkingHours.standard.weekdays)
+    @AppStorage(DailyPlanning.enabledKey) private var dailyPlanning = false
+    @AppStorage(DailyPlanning.timeKey) private var dailyPlanningTime = DailyPlanning.defaultTime
 
     /// Minutes after midnight as a time of day today.
     private func time(_ minutes: Binding<Int>) -> Binding<Date> {
@@ -161,6 +163,20 @@ struct SettingsView: View {
             } footer: {
                 Text("Used to suggest free slots for tasks.")
             }
+            .listRowBackground(Color(theme.surface))
+
+            Section {
+                Toggle("Plan your day reminder", isOn: $dailyPlanning)
+                if dailyPlanning {
+                    DatePicker("Time", selection: time($dailyPlanningTime), displayedComponents: .hourAndMinute)
+                }
+            } header: {
+                Text("Daily planning")
+            } footer: {
+                Text("A notification each day that opens a screen to pick today's tasks and schedule them.")
+            }
+            .onChange(of: dailyPlanning) { Task { await DailyPlanning.sync(prompt: true) } }
+            .onChange(of: dailyPlanningTime) { Task { await DailyPlanning.sync(prompt: true) } }
             .listRowBackground(Color(theme.surface))
 
             Section("On-device AI") {

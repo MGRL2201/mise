@@ -9,7 +9,8 @@ struct Backup: Codable {
     static let currentVersion = 2
     /// UserDefaults keys owned by ThemeStore / AppLock / CalendarStore / TravelTime / WorkingHours.
     static let settingsKeys = ["theme.palette", "lock.mode", "lock.grace", "calendar.hidden", "calendar.colors", "calendar.default",
-                                "travel.transport", "travel.buffer", "planning.workStart", "planning.workEnd", "planning.workDays"]
+                                "travel.transport", "travel.buffer", "planning.workStart", "planning.workEnd", "planning.workDays",
+                                "planning.daily", "planning.dailyTime"]
 
     var version: Int
     var createdAt: Date

@@ -12,3 +12,29 @@ enum LocalNotifications {
         return status == .authorized || status == .provisional
     }
 }
+
+extension LocalNotifications {
+    /// Swaps the pending requests whose identifier starts with `prefix` for `requests` (empty removes them).
+    static func replace(prefix: String, with requests: [UNNotificationRequest]) async {
+        let center = UNUserNotificationCenter.current()
+        let stale = await center.pendingNotificationRequests().map(\.identifier).filter { $0.hasPrefix(prefix) }
+        center.removePendingNotificationRequests(withIdentifiers: stale)
+        for request in requests { try? await center.add(request) }
+    }
+}
+
+/// Notification taps and foreground presentation. Set as the center's delegate in `MiseApp.init`
+/// so a tap that cold-launches the app is still delivered.
+final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate {
+    static let shared = NotificationRouter()
+
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        guard response.notification.request.identifier.hasPrefix(DailyPlanning.identifier) else { return }
+        await MainActor.run { PlanningPrompt.shared.isPresented = true }
+    }
+
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                            willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+        [.banner, .sound]
+    }
+}
