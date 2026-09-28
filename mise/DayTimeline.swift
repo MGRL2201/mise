@@ -187,13 +187,14 @@ struct HourGrid: View {
     }
 }
 
-/// Calendar tab: 1-7 days side by side as a timeline, with all-day events above.
+/// Calendar tab: 1-7 days side by side as a timeline with all-day events above, or month / agenda (#25).
 struct CalendarView: View {
     @Environment(CalendarStore.self) private var store
     @Environment(\.openURL) private var openURL
     /// First visible day.
     @State private var day = Calendar.current.startOfDay(for: .now)
     @AppStorage("calendarDays") private var dayCount = 1
+    @AppStorage("calendarMode") private var mode = CalendarMode.days
     @State private var selected: SelectedEvent?
 
     private struct SelectedEvent: Identifiable {
@@ -221,7 +222,12 @@ struct CalendarView: View {
                 Button("Allow Access") { Task { await store.requestAccess() } }
             }
         case .fullAccess:
-            timeline
+            // Separate branches, so switching back to Days recreates the timeline and its onChange(initial:) re-sets store.range.
+            switch mode {
+            case .days: timeline
+            case .month: MonthView(onSelect: select)
+            case .agenda: AgendaView(onSelect: select)
+            }
         default:
             ContentUnavailableView {
                 Label("Full Access Needed", systemImage: "lock")
@@ -261,6 +267,7 @@ struct CalendarView: View {
                 .frame(minWidth: 110)
                 Button(count == 1 ? "Next Day" : "Next \(count) Days", systemImage: "chevron.right") { shift(1) }
                 Spacer()
+                CalendarModeMenu()
                 Menu("Days Shown", systemImage: "calendar.day.timeline.left") {
                     Picker("Days Shown", selection: $dayCount) {
                         ForEach(1...7, id: \.self) { Text($0 == 1 ? "1 Day" : "\($0) Days").tag($0) }
