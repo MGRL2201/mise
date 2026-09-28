@@ -219,6 +219,7 @@ struct CalendarView: View {
     @AppStorage("calendarDays") private var dayCount = 1
     @AppStorage("calendarMode") private var mode = CalendarMode.days
     @State private var selected: SelectedEvent?
+    @State private var showingSettings = false
     #if DEBUG
     @State private var openedNewEventHook = false
     #endif
@@ -238,6 +239,9 @@ struct CalendarView: View {
                     ToolbarItem(placement: .primaryAction) {
                         Button("New Event", systemImage: "plus", action: createAtNextHour)
                     }
+                    ToolbarItem(placement: .secondaryAction) {
+                        Button("Calendars", systemImage: "slider.horizontal.3") { showingSettings = true }
+                    }
                 }
             }
             .task { await store.refresh() }
@@ -248,7 +252,10 @@ struct CalendarView: View {
                 openedNewEventHook = true
                 createAtNextHour()
             }
+            // Screenshot hook: launch with `-calendarSettings YES` to open calendar settings.
+            .onAppear { if UserDefaults.standard.bool(forKey: "calendarSettings") { showingSettings = true } }
             #endif
+            .sheet(isPresented: $showingSettings) { CalendarSettingsSheet() }
             .sheet(item: $selected) { selection in
                 if selection.event.eventIdentifier?.isEmpty ?? true {  // unsaved, same check as EventEditor
                     EventEditor(event: selection.event)

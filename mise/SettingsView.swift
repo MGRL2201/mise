@@ -23,6 +23,7 @@ struct SettingsView: View {
     @AppStorage(AutoBackup.lastErrorKey) private var autoBackupError: String?
     @State private var autoBackupFolder = AutoBackup.folderURL()?.lastPathComponent
     @State private var isPickingFolder = false
+    @State private var showingCalendarSettings = false
 
     var body: some View {
         @Bindable var lock = lock
@@ -85,6 +86,17 @@ struct SettingsView: View {
                     }
                     .disabled(!stockAPIKeySaved)
                 }
+            }
+            .listRowBackground(Color(theme.surface))
+
+            Section("Calendar") {
+                #if os(iOS)
+                NavigationLink("Calendars") { CalendarSettingsView() }
+                #else
+                // Mac detail column has no NavigationStack to push onto.
+                Button("Calendars…") { showingCalendarSettings = true }
+                    .sheet(isPresented: $showingCalendarSettings) { CalendarSettingsSheet() }
+                #endif
             }
             .listRowBackground(Color(theme.surface))
 
