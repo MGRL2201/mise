@@ -81,7 +81,21 @@ import SwiftUI
     }
 
     func delete(_ event: EKEvent, span: EKSpan = .thisEvent) throws {
+        let id = event.eventIdentifier, occurrence = event.occurrenceDate
+        let predicate = eventStore.predicateForEvents(withStart: event.startDate, end: event.endDate, calendars: nil)
+        let recurs = event.hasRecurrenceRules  // remove() resets the object
         try eventStore.remove(event, span: span, commit: true)
+        // #16: EventKit silently ignores a .thisEvent removal of a series' only
+        // occurrence (COUNT=1 or UNTIL-truncated after a split). Still there? Make it a
+        // one-off and remove that; .futureEvents would also take the split-off series.
+        // Assumes that's the only way a .thisEvent removal leaves the occurrence behind;
+        // any other cause would also get detached and deleted here.
+        if span == .thisEvent, recurs,
+           let left = eventStore.events(matching: predicate).first(where: { $0.eventIdentifier == id && $0.occurrenceDate == occurrence }) {
+            left.recurrenceRules = nil
+            try eventStore.save(left, span: .thisEvent, commit: true)
+            try eventStore.remove(left, span: .thisEvent, commit: true)
+        }
         reloadEvents()
     }
 }
