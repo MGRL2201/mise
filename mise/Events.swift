@@ -12,7 +12,9 @@ import SwiftUI
     var range: DateInterval = {
         let today = Calendar.current.startOfDay(for: .now)
         return DateInterval(start: today, end: Calendar.current.date(byAdding: .day, value: 7, to: today)!)
-    }()
+    }() {
+        didSet { reloadEvents() }
+    }
     var events: [EKEvent] = []
 
     var hasAccess: Bool { status == .fullAccess }
@@ -84,73 +86,7 @@ import SwiftUI
     }
 }
 
-/// Placeholder list of upcoming events; real calendar views land in #23–#27.
-struct CalendarView: View {
-    @Environment(CalendarStore.self) private var store
-    @Environment(\.openURL) private var openURL
-
-    var body: some View {
-        content
-            .navigationTitle("Calendar")
-            .themedBackground()
-            .task { await store.refresh() }
-    }
-
-    @ViewBuilder
-    private var content: some View {
-        switch store.status {
-        case .notDetermined:
-            ContentUnavailableView {
-                Label("Calendar", systemImage: "calendar")
-            } description: {
-                Text("mise needs access to Calendar to show your events.")
-            } actions: {
-                Button("Allow Access") { Task { await store.requestAccess() } }
-            }
-        case .fullAccess:
-            if store.events.isEmpty {
-                ContentUnavailableView("No Upcoming Events", systemImage: "calendar")
-            } else {
-                List(store.events, id: \.rowID) { event in
-                    row(for: event)
-                }
-                .refreshable { await store.refresh() }
-            }
-        default:
-            ContentUnavailableView {
-                Label("Full Access Needed", systemImage: "lock")
-            } description: {
-                Text("mise needs full access to Calendar. Enable it in Settings.")
-            } actions: {
-                Button("Open Settings") {
-                    if let url = privacySettingsURL(macAnchor: "Privacy_Calendars") { openURL(url) }
-                }
-            }
-        }
-    }
-
-    private func row(for event: EKEvent) -> some View {
-        HStack {
-            Circle()
-                .fill(Color(cgColor: event.calendar.cgColor))
-                .frame(width: 10, height: 10)
-            VStack(alignment: .leading) {
-                Text(event.title ?? "")
-                Group {
-                    if event.isAllDay {
-                        Text("All day, \(event.startDate.formatted(.dateTime.weekday().day()))")
-                    } else {
-                        Text(event.startDate, format: .dateTime.weekday().day().hour().minute())
-                    }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-        }
-    }
-}
-
-private extension EKEvent {
+extension EKEvent {
     // Recurring occurrences share eventIdentifier; occurrenceDate (the original
     // series slot) tells them apart even when a detached occurrence is moved.
     var rowID: String { "\(eventIdentifier ?? "")|\(occurrenceDate.timeIntervalSinceReferenceDate)" }
