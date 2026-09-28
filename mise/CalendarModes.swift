@@ -39,6 +39,7 @@ struct CalendarModeMenu: View {
 
 /// One event in a day list: color bar, title, time range or "All day".
 private struct AgendaRow: View {
+    @Environment(CalendarStore.self) private var store
     let event: EKEvent
     let day: Date
     let action: () -> Void
@@ -47,7 +48,7 @@ private struct AgendaRow: View {
         let time = event.showsAllDay(on: day) ? "All day" : (event.startDate..<event.endDate).formatted(.interval.hour().minute())
         Button(action: action) {
             HStack(spacing: 10) {
-                RoundedRectangle(cornerRadius: 2).fill(event.color).frame(width: 4)
+                RoundedRectangle(cornerRadius: 2).fill(store.color(for: event.calendar)).frame(width: 4)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(event.title ?? "").font(.body)
                     Text(time).font(.caption).foregroundStyle(.secondary)
@@ -151,7 +152,7 @@ struct MonthView: View {
                 }
             HStack(spacing: 2) {
                 ForEach(events.prefix(3), id: \.rowID) { event in
-                    Circle().fill(event.color).frame(width: 5, height: 5)
+                    Circle().fill(store.color(for: event.calendar)).frame(width: 5, height: 5)
                 }
                 if events.count > 3 {
                     Text("+").font(.system(size: 8, weight: .bold)).foregroundStyle(.secondary)

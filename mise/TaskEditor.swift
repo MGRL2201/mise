@@ -464,7 +464,7 @@ struct TaskEditor: View {
                 } else {
                     blockStart = draft.hasDueDate && draft.includesTime ? draft.dueDate
                         : Calendar.current.nextDate(after: .now, matching: DateComponents(minute: 0), matchingPolicy: .nextTime) ?? .now
-                    blockCalendarID = calendarStore.eventStore.defaultCalendarForNewEvents?.calendarIdentifier
+                    blockCalendarID = calendarStore.defaultCalendar?.calendarIdentifier
                 }
             }
             .task {

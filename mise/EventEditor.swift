@@ -173,7 +173,7 @@ struct EventEditor: View {
                     Picker("Calendar", selection: $draft.calendarID) {
                         ForEach(store.calendars.filter(\.allowsContentModifications), id: \.calendarIdentifier) { calendar in
                             HStack {
-                                Circle().fill(Color(cgColor: calendar.cgColor)).frame(width: 10, height: 10)
+                                Circle().fill(store.color(for: calendar)).frame(width: 10, height: 10)
                                 Text(calendar.title)
                             }
                             .tag(Optional(calendar.calendarIdentifier))

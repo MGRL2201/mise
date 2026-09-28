@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct SettingsView: View {
     @Environment(ThemeStore.self) private var store
     @Environment(AppLock.self) private var lock
+    @Environment(CalendarStore.self) private var calendars
     @Environment(\.theme) private var theme
     @State private var editingDark = false
     @State private var stockAPIKeyInput = ""
@@ -22,6 +23,7 @@ struct SettingsView: View {
     @AppStorage(AutoBackup.lastErrorKey) private var autoBackupError: String?
     @State private var autoBackupFolder = AutoBackup.folderURL()?.lastPathComponent
     @State private var isPickingFolder = false
+    @State private var showingCalendarSettings = false
 
     var body: some View {
         @Bindable var lock = lock
@@ -84,6 +86,17 @@ struct SettingsView: View {
                     }
                     .disabled(!stockAPIKeySaved)
                 }
+            }
+            .listRowBackground(Color(theme.surface))
+
+            Section("Calendar") {
+                #if os(iOS)
+                NavigationLink("Calendars") { CalendarSettingsView() }
+                #else
+                // Mac detail column has no NavigationStack to push onto.
+                Button("Calendars…") { showingCalendarSettings = true }
+                    .sheet(isPresented: $showingCalendarSettings) { CalendarSettingsSheet() }
+                #endif
             }
             .listRowBackground(Color(theme.surface))
 
@@ -223,6 +236,7 @@ struct SettingsView: View {
                 Data(contentsOf: url), context: modelContext, files: AttachmentFileStore(), defaults: .standard)
             store.reload()
             lock.reload()
+            calendars.reloadSettings()
         } catch {
             backupError = error.localizedDescription
         }
