@@ -192,6 +192,9 @@ struct TaskEditor: View {
     @State private var newSubtask = ""
     @State private var newTag = ""
     @State private var loadedExtras = false
+    @State private var flagged = false
+    @State private var loadedFlagged = false
+    @State private var loadedSubtasks: [Subtask] = []
     @State private var errorMessage: String?
     @State private var confirmingDelete = false
     @State private var timeBlocked = false
@@ -215,16 +218,32 @@ struct TaskEditor: View {
                 Section {
                     TextField("Title", text: $draft.title)
                     TextField("Notes", text: $draft.notes, axis: .vertical)
+                    TextField("URL", text: $draft.url)
+                        #if os(iOS)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        #endif
+                        .autocorrectionDisabled()
                 }
                 Section {
-                    Toggle("Due Date", isOn: $draft.hasDueDate)
+                    Toggle(isOn: Binding(get: { draft.hasDueDate }, set: {
+                        draft.hasDueDate = $0
+                        if !$0 { draft.includesTime = false }
+                    })) { Label("Date", systemImage: "calendar") }
                     if draft.hasDueDate {
-                        Toggle("Include Time", isOn: $draft.includesTime)
-                        DatePicker("Due", selection: $draft.dueDate,
-                                   displayedComponents: draft.includesTime ? [.date, .hourAndMinute] : .date)
-                        Picker("Repeat", selection: $draft.recurrence) {
+                        DatePicker("Date", selection: $draft.dueDate, displayedComponents: .date)
+                    }
+                    Toggle(isOn: Binding(get: { draft.hasDueDate && draft.includesTime }, set: {
+                        draft.includesTime = $0
+                        if $0 { draft.hasDueDate = true }
+                    })) { Label("Time", systemImage: "clock") }
+                    if draft.hasDueDate && draft.includesTime {
+                        DatePicker("Time", selection: $draft.dueDate, displayedComponents: .hourAndMinute)
+                    }
+                    if draft.hasDueDate {
+                        Picker(selection: $draft.recurrence) {
                             ForEach(RecurrencePreset.allCases, id: \.self) { Text($0.rawValue) }
-                        }
+                        } label: { Label("Repeat", systemImage: "repeat") }
                         if draft.recurrence == .custom {
                             Picker("Frequency", selection: $draft.customFrequency) {
                                 Text("Daily").tag(EKRecurrenceFrequency.daily)
@@ -234,16 +253,25 @@ struct TaskEditor: View {
                             }
                             Stepper("Every \(draft.customInterval)", value: $draft.customInterval, in: 1...99)
                         }
-                    }
-                }
-                Section {
-                    Picker("Priority", selection: $draft.priorityBucket) {
-                        ForEach(TaskGrouping.Priority.allCases, id: \.self) { Text($0.rawValue) }
-                    }
-                    Picker("List", selection: $draft.listID) {
-                        ForEach(store.lists.filter(\.allowsContentModifications), id: \.calendarIdentifier) { list in
-                            Text(list.title).tag(Optional(list.calendarIdentifier))
+                        if draft.recurrence != .none {
+                            Picker("End Repeat", selection: Binding(get: { draft.repeatEnd != nil }, set: {
+                                draft.repeatEnd = $0 ? Calendar.current.date(byAdding: .month, value: 1, to: draft.dueDate) : nil
+                            })) {
+                                Text("Never").tag(false)
+                                Text("On Date").tag(true)
+                            }
+                            if let end = draft.repeatEnd {
+                                DatePicker("End Date", selection: Binding(get: { end }, set: { draft.repeatEnd = $0 }),
+                                           displayedComponents: .date)
+                            }
                         }
+                        Picker(selection: $draft.earlyReminder) {
+                            Text("None").tag(TimeInterval?.none)
+                            let options = TaskDraft.earlyReminderOptions
+                            ForEach(options + (draft.earlyReminder.map { options.contains($0) ? [] : [$0] } ?? []), id: \.self) { seconds in
+                                Text(Self.earlyLabel(seconds)).tag(Optional(seconds))
+                            }
+                        } label: { Label("Early Reminder", systemImage: "bell") }
                     }
                 }
                 Section("Time Block") {
@@ -265,6 +293,60 @@ struct TaskEditor: View {
                     } else {
                         Text("Calendar access is off. Turn it on in Settings to time-block tasks.")
                             .foregroundStyle(.secondary)
+                    }
+                }
+                Section("Tags") {
+                    ForEach(tagNames, id: \.self) { name in
+                        HStack {
+                            Text(name)
+                            Spacer()
+                            Button("Remove Tag \(name)", systemImage: "minus.circle.fill") { tagNames.removeAll { $0 == name } }
+                                .labelStyle(.iconOnly)
+                                .buttonStyle(.borderless)
+                        }
+                    }
+                    TextField("Add Tag", text: $newTag)
+                        .onSubmit {
+                            addTag(newTag)
+                            newTag = ""
+                        }
+                    let available = allTags.map(\.name).filter { !hasTag($0) }
+                    if !available.isEmpty {
+                        Menu("Existing Tags") {
+                            ForEach(available, id: \.self) { name in Button(name) { addTag(name) } }
+                        }
+                    }
+                }
+                Section {
+                    NavigationLink {
+                        LocationSearchView(location: $draft.location)
+                    } label: {
+                        LabeledContent {
+                            Text(draft.location?.title ?? "None")
+                        } label: { Label("Location", systemImage: "location") }
+                    }
+                    if let location = draft.location {
+                        Picker("Location", selection: Binding(get: { location.leaving }, set: { draft.location?.leaving = $0 })) {
+                            Text("Arriving").tag(false)
+                            Text("Leaving").tag(true)
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        Button("Remove Location", role: .destructive) { draft.location = nil }
+                    }
+                }
+                Section {
+                    Toggle(isOn: $flagged) { Label("Flag", systemImage: "flag.fill") }
+                        .tint(.orange)
+                }
+                Section {
+                    Picker("Priority", selection: $draft.priorityBucket) {
+                        ForEach(TaskGrouping.Priority.allCases, id: \.self) { Text($0.rawValue) }
+                    }
+                    Picker("List", selection: $draft.listID) {
+                        ForEach(store.lists.filter(\.allowsContentModifications), id: \.calendarIdentifier) { list in
+                            Text(list.title).tag(Optional(list.calendarIdentifier))
+                        }
                     }
                 }
                 Section {
@@ -305,28 +387,6 @@ struct TaskEditor: View {
                         #endif
                     }
                 }
-                Section("Tags") {
-                    ForEach(tagNames, id: \.self) { name in
-                        HStack {
-                            Text(name)
-                            Spacer()
-                            Button("Remove Tag \(name)", systemImage: "minus.circle.fill") { tagNames.removeAll { $0 == name } }
-                                .labelStyle(.iconOnly)
-                                .buttonStyle(.borderless)
-                        }
-                    }
-                    TextField("Add Tag", text: $newTag)
-                        .onSubmit {
-                            addTag(newTag)
-                            newTag = ""
-                        }
-                    let available = allTags.map(\.name).filter { !hasTag($0) }
-                    if !available.isEmpty {
-                        Menu("Existing Tags") {
-                            ForEach(available, id: \.self) { name in Button(name) { addTag(name) } }
-                        }
-                    }
-                }
                 if !isNew {
                     Section {
                         Button("Delete Task", role: .destructive) { confirmingDelete = true }
@@ -351,7 +411,8 @@ struct TaskEditor: View {
                             try store.save(reminder)
                             try TaskExtras.write(in: modelContext, reminderID: reminder.calendarItemIdentifier,
                                                  externalID: reminder.calendarItemExternalIdentifier,
-                                                 subtasks: subtasks, tagNames: tagNames)
+                                                 subtasks: subtasks, tagNames: tagNames,
+                                                 flagged: flagged != loadedFlagged ? flagged : nil, base: loadedSubtasks)
                             if timeBlocked {
                                 if loadedBlock.map({ ($0.start, $0.minutes, $0.calendarID) != (blockStart, blockMinutes, blockCalendarID) }) ?? true {
                                     try createTimeBlock(for: reminder, start: blockStart, duration: TimeInterval(blockMinutes * 60),
@@ -372,6 +433,9 @@ struct TaskEditor: View {
                 let extras = TaskExtras.match((try? modelContext.fetch(FetchDescriptor<TaskExtras>())) ?? [], id: reminder.calendarItemIdentifier,
                                               externalID: reminder.calendarItemExternalIdentifier)
                 subtasks = extras?.subtasks ?? []
+                loadedSubtasks = subtasks
+                flagged = extras?.flagged ?? false
+                loadedFlagged = flagged
                 tagNames = (extras?.tags ?? []).map(\.name).sorted()
                 if let event = store.linkedEvent(for: reminder) {
                     timeBlocked = true
@@ -407,6 +471,11 @@ struct TaskEditor: View {
                 Text(message)
             }
         }
+    }
+
+    static func earlyLabel(_ seconds: TimeInterval) -> String {
+        seconds == 30 * 86400 ? "1 month before"
+            : Duration.seconds(seconds).formatted(.units(allowed: [.weeks, .days, .hours, .minutes], width: .wide)) + " before"
     }
 
     private func hasTag(_ name: String) -> Bool {

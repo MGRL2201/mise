@@ -61,11 +61,11 @@ final class TaskExtras {
         return all.first { $0.externalID == externalID }
     }
 
-    /// Writes the editor's draft for a saved reminder: replaces tags and flag on the matching row,
+    /// Writes the editor's draft for a saved reminder: replaces tags (and flag, unless nil) on the matching row,
     /// creating one only when there is something to store. Subtasks are 3-way merged against the
     /// stored ones when `base` (what the editor loaded) is given, else replaced. Saves.
     static func write(in context: ModelContext, reminderID: String, externalID: String?,
-                      subtasks: [Subtask], tagNames: [String], flagged: Bool = false, base: [Subtask]? = nil) throws {
+                      subtasks: [Subtask], tagNames: [String], flagged: Bool? = nil, base: [Subtask]? = nil) throws {
         var tags: [Tag] = []
         for name in tagNames {
             if let tag = try Tag.named(name, in: context), !tags.contains(where: { $0 === tag }) { tags.append(tag) }
@@ -73,7 +73,7 @@ final class TaskExtras {
         var row = match(try context.fetch(FetchDescriptor<TaskExtras>()), id: reminderID, externalID: externalID)
         let merged = if let base, let row { merge(base: base, mine: subtasks, theirs: row.subtasks) } else { subtasks }
         let subtasks = merged.filter { !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        if row == nil, !subtasks.isEmpty || !tags.isEmpty || flagged {
+        if row == nil, !subtasks.isEmpty || !tags.isEmpty || flagged == true {
             row = TaskExtras(reminderID: reminderID, externalID: externalID)
             context.insert(row!)
         }
@@ -82,7 +82,7 @@ final class TaskExtras {
             row.externalID = externalID
             row.subtasks = subtasks
             row.tags = tags
-            row.flagged = flagged
+            if let flagged { row.flagged = flagged }
         }
         do { try context.save() } catch { context.rollback(); throw error }
     }

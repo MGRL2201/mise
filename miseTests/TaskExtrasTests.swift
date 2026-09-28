@@ -234,6 +234,8 @@ struct TaskExtrasTests {
         try TaskExtras.write(in: context, reminderID: "r", externalID: nil, subtasks: [], tagNames: [], flagged: true)
         let row = try #require(try context.fetch(FetchDescriptor<TaskExtras>()).first)
         #expect(row.flagged)
+        try TaskExtras.write(in: context, reminderID: "r", externalID: nil, subtasks: [], tagNames: [], flagged: nil)
+        #expect(row.flagged)  // nil = untouched, so a flag set elsewhere survives
         try TaskExtras.write(in: context, reminderID: "r", externalID: nil, subtasks: [], tagNames: [], flagged: false)
         #expect(!row.flagged)
     }
