@@ -83,6 +83,7 @@ struct TaskExtrasTests {
         let old = extras("old-id", "ext", in: context)
         old.subtasks = [Subtask(title: "old")]
         old.tags = [work, home]
+        old.flagged = true
         let fresh = extras("new-id", nil, in: context)
         fresh.subtasks = [Subtask(title: "new")]
         fresh.tags = [work]
@@ -94,6 +95,7 @@ struct TaskExtrasTests {
         #expect(left.count == 1 && left.first === fresh)
         #expect(fresh.subtasks.map(\.title) == ["new", "old"])
         #expect(Set((fresh.tags ?? []).map(\.name)) == ["Work", "Home"])
+        #expect(fresh.flagged)
     }
 
     @Test func tagNamedTrimsAndIgnoresCase() throws {
@@ -185,5 +187,54 @@ struct TaskExtrasTests {
 
         #expect(try context.fetch(FetchDescriptor<TaskExtras>()).count == 1)
         #expect(fresh.eventID == "e1")
+    }
+
+    // MARK: 3-way subtask merge
+
+    private let a = Subtask(title: "a"), b = Subtask(title: "b"), c = Subtask(title: "c")
+
+    private func done(_ s: Subtask) -> Subtask { var s = s; s.done = true; return s }
+    private func renamed(_ s: Subtask, _ title: String) -> Subtask { var s = s; s.title = title; return s }
+
+    @Test func mergeKeepsCheckOffElsewhere() {
+        #expect(TaskExtras.merge(base: [a, b], mine: [a, b], theirs: [done(a), b]) == [done(a), b])
+    }
+
+    @Test func mergeKeepsMyRenameAndTheirCheckOff() {
+        #expect(TaskExtras.merge(base: [a], mine: [renamed(a, "A")], theirs: [done(a)]) == [done(renamed(a, "A"))])
+    }
+
+    @Test func mergeAppendsAdditionElsewhere() {
+        let mine = Subtask(title: "mine")
+        #expect(TaskExtras.merge(base: [a], mine: [a, mine], theirs: [c, a]) == [a, mine, c])
+    }
+
+    @Test func mergeMyDeleteWins() {
+        #expect(TaskExtras.merge(base: [a, b], mine: [b], theirs: [done(a), b]) == [b])
+    }
+
+    @Test func mergeTheirDeleteOfUntouchedWins() {
+        #expect(TaskExtras.merge(base: [a, b], mine: [a, b], theirs: [b]) == [b])
+        #expect(TaskExtras.merge(base: [a, b], mine: [renamed(a, "A"), b], theirs: [b]) == [renamed(a, "A"), b])
+    }
+
+    @Test func writeWithBaseMerges() throws {
+        let context = context()
+        try TaskExtras.write(in: context, reminderID: "r", externalID: nil, subtasks: [a, b], tagNames: [])
+        let row = try #require(try context.fetch(FetchDescriptor<TaskExtras>()).first)
+        try TaskExtras.toggleSubtask(a.id, in: row, context: context)  // checked off in the list while editing
+
+        try TaskExtras.write(in: context, reminderID: "r", externalID: nil, subtasks: [a, renamed(b, "B")],
+                             tagNames: [], base: [a, b])
+        #expect(row.subtasks == [done(a), renamed(b, "B")])
+    }
+
+    @Test func flaggedOnlyCreatesRowAndRoundTrips() throws {
+        let context = context()
+        try TaskExtras.write(in: context, reminderID: "r", externalID: nil, subtasks: [], tagNames: [], flagged: true)
+        let row = try #require(try context.fetch(FetchDescriptor<TaskExtras>()).first)
+        #expect(row.flagged)
+        try TaskExtras.write(in: context, reminderID: "r", externalID: nil, subtasks: [], tagNames: [], flagged: false)
+        #expect(!row.flagged)
     }
 }

@@ -1,8 +1,10 @@
 import SwiftUI
 import SwiftData
 @preconcurrency import EventKit
+import CoreLocation
 
-// ponytail: custom = frequency + "every N" only; end dates and specific weekdays aren't editable yet (existing ones survive untouched).
+// ponytail: custom = frequency + "every N" only; specific weekdays and occurrence-count ends aren't editable yet
+// (existing ones survive untouched). End dates are editable via TaskDraft.repeatEnd.
 enum RecurrencePreset: String, CaseIterable {
     case none = "Never", daily = "Daily", weekdays = "Weekdays", weekly = "Weekly", biweekly = "Every 2 Weeks"
     case monthly = "Monthly", yearly = "Yearly", custom = "Custom"
@@ -34,9 +36,18 @@ enum RecurrencePreset: String, CaseIterable {
         let extras = { (r: EKRecurrenceRule) in
             [r.daysOfTheMonth, r.monthsOfTheYear, r.weeksOfTheYear, r.daysOfTheYear, r.setPositions].allSatisfy { ($0 ?? []).isEmpty }
         }
-        return a.frequency == b.frequency && a.interval == b.interval && b.recurrenceEnd == nil
+        return a.frequency == b.frequency && a.interval == b.interval && (b.recurrenceEnd?.occurrenceCount ?? 0) == 0
             && days(a) == days(b) && extras(b)
     }
+}
+
+/// A geofence alarm: notify on arriving at (or leaving) a place.
+struct LocationReminder: Equatable {
+    var title: String
+    var latitude: Double
+    var longitude: Double
+    var radius: Double
+    var leaving: Bool
 }
 
 /// Plain editable copy of a reminder; nothing touches EventKit until `apply`.
@@ -51,7 +62,17 @@ struct TaskDraft: Equatable {
     var recurrence = RecurrencePreset.none
     var customFrequency = EKRecurrenceFrequency.daily
     var customInterval = 1
-    var alarms: [Date] = []
+    var repeatEnd: Date?
+    var url = ""
+    /// Seconds before due (positive).
+    var earlyReminder: TimeInterval?
+    var location: LocationReminder?
+
+    static let earlyReminderOptions: [TimeInterval] = [300, 900, 1800, 3600, 7200, 86400, 2 * 86400, 7 * 86400, 30 * 86400]
+
+    private static func isEarly(_ alarm: EKAlarm) -> Bool {
+        alarm.absoluteDate == nil && alarm.proximity == .none && alarm.relativeOffset < 0
+    }
 
     init(_ reminder: EKReminder) {
         title = reminder.title ?? ""
@@ -69,7 +90,16 @@ struct TaskDraft: Equatable {
             customFrequency = rule.frequency
             customInterval = rule.interval
         }
-        alarms = (reminder.alarms ?? []).compactMap(\.absoluteDate)
+        repeatEnd = rule?.recurrenceEnd?.endDate
+        url = reminder.url?.absoluteString ?? ""
+        let alarms = reminder.alarms ?? []
+        earlyReminder = alarms.first(where: Self.isEarly).map { -$0.relativeOffset }
+        if let alarm = alarms.first(where: { $0.structuredLocation != nil && $0.proximity != .none }),
+           let place = alarm.structuredLocation {
+            location = LocationReminder(
+                title: place.title ?? "", latitude: place.geoLocation?.coordinate.latitude ?? 0,
+                longitude: place.geoLocation?.coordinate.longitude ?? 0, radius: place.radius, leaving: alarm.proximity == .leave)
+        }
     }
 
     /// Picker-facing priority; setting the bucket the raw value already falls in keeps it (e.g. 3 stays 3).
@@ -96,22 +126,44 @@ struct TaskDraft: Equatable {
             let fields: Set<Calendar.Component> = includesTime ? [.year, .month, .day, .hour, .minute] : [.year, .month, .day]
             reminder.dueDateComponents = hasDueDate ? Calendar.current.dateComponents(fields, from: dueDate) : nil
             reminder.startDateComponents = nil
+            // Timed dues notify at the due time like Reminders.app: drop the old due's alarm, keep others.
+            let oldDue = before.hasDueDate && before.includesTime ? before.dueDate : nil
+            reminder.alarms = (reminder.alarms ?? []).filter { alarm in
+                if let date = alarm.absoluteDate { return date != oldDue }
+                return alarm.proximity != .none || alarm.relativeOffset != 0
+            } + (hasDueDate && includesTime ? [EKAlarm(relativeOffset: 0)] : [])
         }
         if hasDueDate {
             // Only rewrite recurrence the user changed, so rules we can't represent survive.
-            if recurrence != before.recurrence
+            if recurrence != before.recurrence || repeatEnd != before.repeatEnd
                 || (recurrence == .custom && (customFrequency, customInterval) != (before.customFrequency, before.customInterval)) {
                 let rule = recurrence == .custom
                     ? EKRecurrenceRule(recurrenceWith: customFrequency, interval: customInterval, end: nil)
                     : recurrence.rule
+                rule?.recurrenceEnd = repeatEnd.map { EKRecurrenceEnd(end: $0) }
                 reminder.recurrenceRules = rule.map { [$0] }
             }
         } else {
             reminder.recurrenceRules = nil  // EventKit requires a due date for recurrence
         }
-        if alarms != before.alarms {
-            let kept = (reminder.alarms ?? []).filter { $0.absoluteDate == nil }
-            reminder.alarms = kept + alarms.map { EKAlarm(absoluteDate: $0) }
+        if url != before.url {
+            reminder.url = URL(string: url.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        if earlyReminder != before.earlyReminder {
+            reminder.alarms = (reminder.alarms ?? []).filter { !Self.isEarly($0) }
+                + (earlyReminder.map { [EKAlarm(relativeOffset: -$0)] } ?? [])
+        }
+        if location != before.location {
+            reminder.alarms = (reminder.alarms ?? []).filter { $0.proximity == .none }
+                + (location.map { location in
+                    let place = EKStructuredLocation(title: location.title)
+                    place.geoLocation = CLLocation(latitude: location.latitude, longitude: location.longitude)
+                    place.radius = location.radius
+                    let alarm = EKAlarm()
+                    alarm.structuredLocation = place
+                    alarm.proximity = location.leaving ? .leave : .enter
+                    return [alarm]
+                } ?? [])
         }
     }
 }
@@ -181,22 +233,6 @@ struct TaskEditor: View {
                         ForEach(store.lists.filter(\.allowsContentModifications), id: \.calendarIdentifier) { list in
                             Text(list.title).tag(Optional(list.calendarIdentifier))
                         }
-                    }
-                }
-                Section("Alarms") {
-                    ForEach(Array(draft.alarms.enumerated()), id: \.offset) { index, alarm in
-                        HStack {
-                            DatePicker("Alarm", selection: Binding(
-                                get: { alarm },
-                                set: { if draft.alarms.indices.contains(index) { draft.alarms[index] = $0 } }
-                            ))
-                            Button("Remove Alarm", systemImage: "minus.circle.fill") { draft.alarms.remove(at: index) }
-                                .labelStyle(.iconOnly)
-                                .buttonStyle(.borderless)
-                        }
-                    }
-                    Button("Add Alarm") {
-                        draft.alarms.append(draft.hasDueDate ? draft.dueDate : .now.addingTimeInterval(3600))
                     }
                 }
                 Section("Time Block") {

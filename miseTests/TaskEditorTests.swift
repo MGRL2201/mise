@@ -39,7 +39,7 @@ struct TaskEditorTests {
         draft.dueDate = dueDate()
         draft.priorityBucket = .high
         draft.recurrence = .weekdays
-        draft.alarms = [dueDate().addingTimeInterval(-3600)]
+        draft.url = "https://example.com/rent"
         draft.apply(to: reminder, lists: [])
 
         #expect(reminder.dueDateComponents?.hour == 9)
@@ -85,13 +85,136 @@ struct TaskEditorTests {
 
         var draft = TaskDraft(reminder)
         draft.priorityBucket = .high  // same bucket as 3: raw value kept
-        draft.alarms = []
         draft.apply(to: reminder, lists: [])
 
         #expect(reminder.priority == 3)
         #expect(reminder.recurrenceRules?.first?.recurrenceEnd?.occurrenceCount == 5)
-        #expect(reminder.alarms?.count == 1)
+        #expect(reminder.alarms?.count == 2)
         #expect(reminder.alarms?.first?.relativeOffset == -600)
+        #expect(reminder.alarms?.last?.absoluteDate == dueDate())
+    }
+
+    @Test func dateOnlyDueAddsNoAlarm() {
+        let reminder = EKReminder(eventStore: EKEventStore())
+        var draft = TaskDraft(reminder)
+        draft.hasDueDate = true
+        draft.dueDate = dueDate()
+        draft.apply(to: reminder, lists: [])
+        #expect(reminder.dueDateComponents?.hour == nil)
+        #expect((reminder.alarms ?? []).isEmpty)
+    }
+
+    @Test func timedDueAddsOneDueAlarm() {
+        let reminder = EKReminder(eventStore: EKEventStore())
+        var draft = TaskDraft(reminder)
+        draft.hasDueDate = true
+        draft.includesTime = true
+        draft.dueDate = dueDate()
+        draft.apply(to: reminder, lists: [])
+        #expect(reminder.alarms?.count == 1)
+        #expect(reminder.alarms?.first?.absoluteDate == nil && reminder.alarms?.first?.relativeOffset == 0)
+    }
+
+    @Test func movingTimedDueReplacesOldDueAlarmOnly() {
+        let reminder = EKReminder(eventStore: EKEventStore())
+        reminder.dueDateComponents = DateComponents(year: 2030, month: 1, day: 2, hour: 9, minute: 30)
+        let unrelated = dueDate().addingTimeInterval(-86400)
+        reminder.alarms = [EKAlarm(absoluteDate: dueDate()), EKAlarm(absoluteDate: unrelated)]
+
+        var draft = TaskDraft(reminder)
+        draft.dueDate = dueDate().addingTimeInterval(3600)
+        draft.apply(to: reminder, lists: [])
+
+        let alarms = reminder.alarms ?? []
+        #expect(alarms.count == 2)
+        #expect(alarms.compactMap(\.absoluteDate) == [unrelated])
+        #expect(alarms.filter { $0.absoluteDate == nil && $0.relativeOffset == 0 }.count == 1)
+    }
+
+    @Test func earlyReminderRoundTrips() {
+        let reminder = EKReminder(eventStore: EKEventStore())
+        var draft = TaskDraft(reminder)
+        draft.hasDueDate = true
+        draft.includesTime = true
+        draft.dueDate = dueDate()
+        draft.earlyReminder = 3600
+        draft.apply(to: reminder, lists: [])
+        #expect(reminder.alarms?.contains { $0.relativeOffset == -3600 } == true)
+        #expect(TaskDraft(reminder).earlyReminder == 3600)
+
+        draft = TaskDraft(reminder)
+        draft.earlyReminder = nil
+        draft.apply(to: reminder, lists: [])
+        #expect(reminder.alarms?.contains { $0.relativeOffset < 0 } == false)
+        #expect(reminder.alarms?.count == 1)  // due alarm stays
+    }
+
+    @Test func untouchedEarlyReminderAndLocationSurviveTitleEdit() {
+        let reminder = EKReminder(eventStore: EKEventStore())
+        var draft = TaskDraft(reminder)
+        draft.earlyReminder = 900
+        draft.location = LocationReminder(title: "Home", latitude: 1.3, longitude: 103.8, radius: 150, leaving: false)
+        draft.apply(to: reminder, lists: [])
+
+        draft = TaskDraft(reminder)
+        draft.title = "Renamed"
+        draft.apply(to: reminder, lists: [])
+        let reread = TaskDraft(reminder)
+        #expect(reread.earlyReminder == 900)
+        #expect(reread.location?.title == "Home")
+        #expect(reminder.alarms?.count == 2)
+    }
+
+    @Test func endRepeatRoundTrips() {
+        let reminder = EKReminder(eventStore: EKEventStore())
+        let end = dueDate().addingTimeInterval(30 * 86400)
+        var draft = TaskDraft(reminder)
+        draft.hasDueDate = true
+        draft.dueDate = dueDate()
+        draft.recurrence = .weekly
+        draft.repeatEnd = end
+        draft.apply(to: reminder, lists: [])
+
+        #expect(reminder.recurrenceRules?.first?.recurrenceEnd?.endDate == end)
+        let reread = TaskDraft(reminder)
+        #expect(reread.recurrence == .weekly)
+        #expect(reread.repeatEnd == end)
+
+        draft = reread
+        draft.repeatEnd = nil
+        draft.apply(to: reminder, lists: [])
+        #expect(reminder.recurrenceRules?.first?.recurrenceEnd == nil)
+        #expect(TaskDraft(reminder).recurrence == .weekly)
+    }
+
+    @Test func countEndedRuleStaysCustomAndSurvives() {
+        let reminder = EKReminder(eventStore: EKEventStore())
+        reminder.dueDateComponents = DateComponents(year: 2030, month: 1, day: 2)
+        reminder.recurrenceRules = [EKRecurrenceRule(recurrenceWith: .weekly, interval: 1, end: EKRecurrenceEnd(occurrenceCount: 3))]
+        var draft = TaskDraft(reminder)
+        #expect(draft.recurrence == .custom && draft.repeatEnd == nil)
+        draft.notes = "edited"
+        draft.apply(to: reminder, lists: [])
+        #expect(reminder.recurrenceRules?.first?.recurrenceEnd?.occurrenceCount == 3)
+    }
+
+    @Test func locationReminderRoundTrips() {
+        let reminder = EKReminder(eventStore: EKEventStore())
+        var draft = TaskDraft(reminder)
+        let office = LocationReminder(title: "Office", latitude: 1.28, longitude: 103.85, radius: 200, leaving: true)
+        draft.location = office
+        draft.apply(to: reminder, lists: [])
+
+        let alarm = reminder.alarms?.first
+        #expect(alarm?.proximity == .leave)
+        #expect(alarm?.structuredLocation?.radius == 200)
+        #expect(alarm?.structuredLocation?.title == "Office")
+        #expect(TaskDraft(reminder).location == office)
+
+        draft = TaskDraft(reminder)
+        draft.location = nil
+        draft.apply(to: reminder, lists: [])
+        #expect((reminder.alarms ?? []).isEmpty)
     }
 
     @Test func unchangedDueKeepsTimeZone() {

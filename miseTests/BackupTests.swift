@@ -114,6 +114,7 @@ extension BackupTests {
         extras.subtasks = [Subtask(title: "one", done: true), Subtask(title: "two"), Subtask(title: "three")]
         extras.tags = [work]
         extras.eventID = "ev1"
+        extras.flagged = true
         source.context.insert(extras)
         try source.context.save()
 
@@ -131,6 +132,7 @@ extension BackupTests {
         #expect(copy.subtasks == extras.subtasks)
         #expect(copy.tags?.map(\.name) == ["Work"])
         #expect(copy.eventID == "ev1")
+        #expect(copy.flagged)
     }
 
     @Test func version1BackupStillRestores() throws {

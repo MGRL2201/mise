@@ -24,6 +24,7 @@ struct Backup: Codable {
         var subtasks: [Subtask]
         var tagNames: [String]
         var eventID: String?
+        var flagged: Bool?  // optional: older v2 files lack it
     }
 
     struct AttachmentRecord: Codable {
@@ -57,7 +58,8 @@ enum BackupService {
         let tags = try context.fetch(FetchDescriptor<Tag>()).map(\.name)
         let taskExtras = try context.fetch(FetchDescriptor<TaskExtras>()).map {
             Backup.TaskExtrasRecord(reminderID: $0.reminderID, externalID: $0.externalID,
-                                    subtasks: $0.subtasks, tagNames: ($0.tags ?? []).map(\.name), eventID: $0.eventID)
+                                    subtasks: $0.subtasks, tagNames: ($0.tags ?? []).map(\.name), eventID: $0.eventID,
+                                    flagged: $0.flagged)
         }
         var settings: [String: Any] = [:]
         for key in Backup.settingsKeys { settings[key] = defaults.object(forKey: key) }
@@ -103,6 +105,7 @@ enum BackupService {
                     let extras = TaskExtras(reminderID: record.reminderID, externalID: record.externalID)
                     extras.subtasks = record.subtasks
                     extras.eventID = record.eventID
+                    extras.flagged = record.flagged ?? false
                     context.insert(extras)
                     extras.tags = record.tagNames.compactMap { tagsByKey[key($0)] }
                 }
