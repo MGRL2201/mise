@@ -474,6 +474,9 @@ struct EventDetailView: View {
     let event: EKEvent
     @Environment(\.dismiss) private var dismiss
     @State private var editing = false
+    @State private var travelTime: String?
+
+    private var showsTravelTime: Bool { !event.isAllDay && event.structuredLocation?.geoLocation != nil }
 
     var body: some View {
         if editing {
@@ -503,7 +506,12 @@ struct EventDetailView: View {
                     }
                 }
                 if let location = event.location, !location.isEmpty {
-                    Section("Location") { Text(location) }
+                    Section("Location") {
+                        Text(location)
+                        if showsTravelTime {
+                            Text(travelTime ?? "Travel time unavailable").foregroundStyle(.secondary)
+                        }
+                    }
                 }
                 if let url = event.url {
                     Section("URL") { Link(url.absoluteString, destination: url) }
@@ -513,6 +521,10 @@ struct EventDetailView: View {
                 }
             }
             .navigationTitle("Event")
+            .task {
+                guard showsTravelTime, await LocationPermission.shared.allowed(prompt: true) else { return }
+                travelTime = await TravelTime.eta(to: event).map(TravelTime.describe)
+            }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
                 if event.calendar.allowsContentModifications {

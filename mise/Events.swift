@@ -46,6 +46,7 @@ import SwiftUI
             for await _ in NotificationCenter.default.notifications(named: .EKEventStoreChanged, object: store) {
                 guard let self else { return }
                 await self.refresh()
+                Task { await TravelTime.refresh(store: self, prompt: false) }  // also covers edits made in Calendar.app
             }
         }
     }

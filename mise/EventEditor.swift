@@ -5,6 +5,9 @@ import SwiftUI
 struct EventDraft: Equatable {
     var title = ""
     var location = ""
+    /// Set when the location is a picked place; free-text locations have none.
+    var latitude: Double?
+    var longitude: Double?
     var isAllDay = false
     var startDate = Date()
     var endDate = Date()
@@ -24,7 +27,9 @@ struct EventDraft: Equatable {
 
     init(_ event: EKEvent) {
         title = event.title ?? ""
-        location = event.location ?? ""
+        location = event.location ?? event.structuredLocation?.title ?? ""
+        latitude = event.structuredLocation?.geoLocation?.coordinate.latitude
+        longitude = event.structuredLocation?.geoLocation?.coordinate.longitude
         isAllDay = event.isAllDay
         startDate = event.startDate ?? Date()
         endDate = event.endDate ?? startDate
@@ -73,7 +78,17 @@ struct EventDraft: Equatable {
         let alarms = (event.alarms ?? []).map { $0.copy() as! EKAlarm }
         event.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         event.notes = notes.isEmpty ? nil : notes
-        event.location = location.isEmpty ? nil : location
+        if (location, latitude, longitude) != (before.location, before.latitude, before.longitude) {
+            // Setting structuredLocation also sets location (nil clears it), so it goes first.
+            if let latitude, let longitude {
+                let place = EKStructuredLocation(title: location)
+                place.geoLocation = CLLocation(latitude: latitude, longitude: longitude)
+                event.structuredLocation = place
+            } else {
+                event.structuredLocation = nil
+                event.location = location.isEmpty ? nil : location
+            }
+        }
         if isAllDay != before.isAllDay { event.isAllDay = isAllDay }
         if startDate != before.startDate { event.startDate = startDate }
         if endDate != before.endDate { event.endDate = endDate }
@@ -131,7 +146,19 @@ struct EventEditor: View {
             Form {
                 Section {
                     TextField("Title", text: $draft.title)
-                    TextField("Location", text: $draft.location)
+                }
+                Section {
+                    NavigationLink {
+                        LocationSearchView(location: place)
+                    } label: {
+                        LabeledContent {
+                            Text(draft.location.isEmpty ? "None" : draft.location)
+                        } label: { Label("Location", systemImage: "location") }
+                    }
+                    if !draft.location.isEmpty {
+                        Button("Remove Location", role: .destructive) { place.wrappedValue = nil }
+                            .foregroundStyle(.red)
+                    }
                 }
                 Section {
                     // Offsets mean different things all-day vs timed, so a flip clears alerts (Calendar.app does too).
@@ -247,6 +274,18 @@ struct EventEditor: View {
                 Text(message)
             }
         }
+    }
+
+    /// The picker speaks LocationReminder; radius/leaving are ignored for events.
+    private var place: Binding<LocationReminder?> {
+        Binding(get: {
+            guard let latitude = draft.latitude, let longitude = draft.longitude else { return nil }
+            return LocationReminder(title: draft.location, latitude: latitude, longitude: longitude, radius: 100, leaving: false)
+        }, set: {
+            draft.location = $0?.title ?? ""
+            draft.latitude = $0?.latitude
+            draft.longitude = $0?.longitude
+        })
     }
 
     /// Alert slot `index`; lists the current value even when it isn't a standard option, so opening the editor keeps it.

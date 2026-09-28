@@ -37,11 +37,14 @@ struct MiseApp: App {
                     switch phase {
                     case .active:
                         AutoBackup.run(context: container.mainContext)
+                        Task { await TravelTime.refresh(store: calendar, prompt: true) }
                         #if os(iOS)
                         Self.recordSpikeLaunch()
                         #endif
                     #if os(iOS)
-                    case .background: AutoBackup.scheduleRefresh()
+                    case .background:
+                        AutoBackup.scheduleRefresh()
+                        TravelTime.scheduleRefresh()
                     #endif
                     default: break
                     }
@@ -54,6 +57,10 @@ struct MiseApp: App {
                 AutoBackup.run(context: container.mainContext)
                 AutoBackup.scheduleRefresh()
             }
+        }
+        .backgroundTask(.appRefresh(TravelTime.taskID)) { [calendar] in
+            await TravelTime.refresh(store: calendar, prompt: false)
+            await TravelTime.scheduleRefresh()
         }
         #endif
     }

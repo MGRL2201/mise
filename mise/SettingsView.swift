@@ -24,6 +24,8 @@ struct SettingsView: View {
     @State private var autoBackupFolder = AutoBackup.folderURL()?.lastPathComponent
     @State private var isPickingFolder = false
     @State private var showingCalendarSettings = false
+    @AppStorage(TravelTime.transportKey) private var travelTransport = TravelTime.Transport.driving
+    @AppStorage(TravelTime.bufferKey) private var travelBuffer = 10
 
     var body: some View {
         @Bindable var lock = lock
@@ -98,6 +100,20 @@ struct SettingsView: View {
                     .sheet(isPresented: $showingCalendarSettings) { CalendarSettingsSheet() }
                 #endif
             }
+            .listRowBackground(Color(theme.surface))
+
+            Section {
+                Picker("Travel by", selection: $travelTransport) {
+                    ForEach(TravelTime.Transport.allCases, id: \.self) { Text($0.title) }
+                }
+                Stepper("Leave \(travelBuffer) min early", value: $travelBuffer, in: 0...120, step: 5)
+            } header: {
+                Text("Leave-now alerts")
+            } footer: {
+                Text("Travel time is refreshed when the app opens and when iOS runs background refresh, so it can be out of date.")
+            }
+            .onChange(of: travelTransport) { Task { await TravelTime.refresh(store: calendars, prompt: false) } }
+            .onChange(of: travelBuffer) { Task { await TravelTime.refresh(store: calendars, prompt: false) } }
             .listRowBackground(Color(theme.surface))
 
             Section("On-device AI") {
