@@ -33,6 +33,17 @@ struct DayGridTests {
         #expect(DayGrid.page(date(6), by: 1, count: 1, calendar: calendar) == date(7))
     }
 
+    @Test func newEventStartIsNextWholeHour() {
+        let now = calendar.date(byAdding: .minute, value: 20, to: date(6, hour: 14))!
+        #expect(DayGrid.newEventStart(on: date(6), now: now, calendar: calendar) == date(6, hour: 15))
+        // Late today rolls to tomorrow instead of a past slot.
+        let late = calendar.date(byAdding: .minute, value: 30, to: date(6, hour: 23))!
+        #expect(DayGrid.newEventStart(on: date(6), now: late, calendar: calendar) == date(7))
+        // Another visible day: same next hour, on that day.
+        #expect(DayGrid.newEventStart(on: date(9), now: now, calendar: calendar) == date(9, hour: 15))
+        #expect(DayGrid.newEventStart(on: date(9), now: late, calendar: calendar) == date(9))
+    }
+
     @Test func pinchThresholdsAndClamps() {
         #expect(DayGrid.count(afterPinch: 1.5, from: 3) == 2)
         #expect(DayGrid.count(afterPinch: 0.6, from: 3) == 4)

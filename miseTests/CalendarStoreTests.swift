@@ -86,6 +86,50 @@ struct CalendarStoreTests {
         try await pollUntil(timeout: 5) { occurrences().isEmpty }
     }
 
+    /// #16: after a .futureEvents split, the first series has one occurrence
+    /// (COUNT=1 when the series had a count, UNTIL otherwise); a .thisEvent
+    /// delete of it must still remove it.
+    @Test(.enabled(if: EKEventStore.authorizationStatus(for: .event) == .fullAccess), arguments: [3, nil] as [Int?])
+    func thisEventDeleteOfOnlyOccurrenceRemovesIt(count: Int?) async throws {
+        let store = CalendarStore()
+        await store.refresh()
+        let source = try #require(
+            store.eventStore.defaultCalendarForNewEvents?.source
+                ?? store.eventStore.sources.first { $0.sourceType == .local }
+        )
+        let calendar = EKCalendar(for: .event, eventStore: store.eventStore)
+        calendar.title = "mise-test-\(UUID().uuidString)"
+        calendar.source = source
+        try store.eventStore.saveCalendar(calendar, commit: true)
+        defer { try? store.eventStore.removeCalendar(calendar, commit: true) }
+
+        let today = Calendar.current.startOfDay(for: .now)
+        let start = Calendar.current.date(bySettingHour: 10, minute: 0, second: 0, of: today.addingTimeInterval(7 * 86400))!
+        let event = store.newEvent(in: calendar)
+        event.title = "mise only-occurrence test"
+        event.startDate = start
+        event.endDate = start.addingTimeInterval(60 * 60)
+        event.recurrenceRules = [
+            EKRecurrenceRule(recurrenceWith: .weekly, interval: 1, end: count.map { EKRecurrenceEnd(occurrenceCount: $0) })
+        ]
+        try store.save(event)
+        store.range = DateInterval(start: today, duration: 5 * 7 * 86400)
+        func occurrences() -> [EKEvent] {
+            store.events.filter { $0.calendar.calendarIdentifier == calendar.calendarIdentifier }
+        }
+
+        let second = try #require(occurrences().dropFirst().first)
+        second.title = "mise only-occurrence test split"
+        try store.save(second, span: .futureEvents)
+        let first = try #require(occurrences().first)
+        #expect(first.title == "mise only-occurrence test")
+        let others = occurrences().count - 1
+
+        try store.delete(first, span: .thisEvent)
+        #expect(!occurrences().contains { $0.title == "mise only-occurrence test" })
+        #expect(occurrences().count == others)
+    }
+
     /// Polls `condition` until it returns true or `timeout` elapses.
     private func pollUntil(timeout: TimeInterval, condition: () throws -> Bool) async throws {
         let deadline = Date().addingTimeInterval(timeout)
