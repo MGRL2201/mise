@@ -241,6 +241,9 @@ struct TasksView: View {
     @State private var filterTag: String?
     @State private var quickText = ""
     @State private var parsing = false
+    @State private var dictation = Dictation()
+    @State private var showingGuide = false
+    @State private var visible = false
     @State private var deleting: EKReminder?
     // Unknown `#list` prompts; separate so "No" can hand off to `creating` without the dismiss setter clobbering it.
     @State private var suggesting: Suggestion?
@@ -261,6 +264,17 @@ struct TasksView: View {
 
     var body: some View {
         quickAddPrompts(mainView)
+            .onChange(of: dictation.transcript) { if dictation.isRecording { quickText = $1 } }
+            .sheet(isPresented: $showingGuide) { QuickAddGuide() }
+            .alert("Can't dictate", isPresented: Binding(get: { dictation.error != nil }, set: { if !$0 { dictation.error = nil } }),
+                   presenting: dictation.error) { message in
+                if message == Dictation.micDenied {
+                    Button("Open Settings") {
+                        if let url = privacySettingsURL(macAnchor: "Privacy_Microphone") { openURL(url) }
+                    }
+                }
+                Button("OK", role: .cancel) {}
+            } message: { Text($0) }
     }
 
     private var mainView: some View {
@@ -289,6 +303,12 @@ struct TasksView: View {
                             .onSubmit(quickAdd)
                             .disabled(parsing)
                         if parsing { ProgressView().controlSize(.small) }
+                        Button(dictation.isRecording ? "Stop dictation" : "Dictate task",
+                               systemImage: dictation.isRecording ? "stop.circle.fill" : "mic", action: toggleDictation)
+                            .labelStyle(.iconOnly)
+                            .disabled(parsing || dictation.busy)
+                        Button("Quick add guide", systemImage: "questionmark.circle") { showingGuide = true }
+                            .labelStyle(.iconOnly)
                     }
                     .padding()
                 }
@@ -300,6 +320,8 @@ struct TasksView: View {
                 Button("Delete Task Only", role: .destructive) { mutate { try store.delete(reminder) } }
             }
             .task { await store.refresh() }
+            .onAppear { visible = true }
+            .onDisappear { visible = false; if dictation.isRecording { Task { _ = await dictation.stop() } } }
             // ponytail: day rollover only; timed reminders passing their due time mid-day don't turn red until the next re-render.
             .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in Task { await store.refresh() } }
             .alert(
@@ -332,6 +354,20 @@ struct TasksView: View {
                 }
             } else {
                 openEditor(q)
+            }
+        }
+    }
+
+    /// Tap to start; tap again to stop and send the transcript through `quickAdd()`.
+    private func toggleDictation() {
+        Task {
+            if dictation.isRecording {
+                quickText = QuickAdd.fromSpeech(await dictation.stop())
+                if dictation.error == nil { quickAdd() }
+            } else {
+                quickText = ""
+                await dictation.start()
+                if !visible { _ = await dictation.stop() }  // left while start() awaited permission/model
             }
         }
     }
