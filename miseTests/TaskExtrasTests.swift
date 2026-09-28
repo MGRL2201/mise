@@ -159,6 +159,21 @@ struct TaskExtrasTests {
         #expect(try context.fetch(FetchDescriptor<TaskExtras>()).first?.eventID == "e1")
     }
 
+    @Test func toggleSubtaskFlipsDoneAndIgnoresUnknownID() throws {
+        let context = context()
+        let row = extras("r", nil, in: context)
+        let first = Subtask(title: "one")
+        row.subtasks = [first, Subtask(title: "two", done: true)]
+        try context.save()
+
+        try TaskExtras.toggleSubtask(first.id, in: row, context: context)
+        #expect(try ModelContext(container).fetch(FetchDescriptor<TaskExtras>()).first?.subtasks.map(\.done) == [true, true])
+        #expect(!context.hasChanges)
+
+        try TaskExtras.toggleSubtask(UUID(), in: row, context: context)
+        #expect(row.subtasks.map(\.done) == [true, true])
+    }
+
     @Test func reconcileMergeCarriesEventID() throws {
         let context = context()
         let old = extras("old-id", "ext", in: context)
