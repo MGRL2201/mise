@@ -130,18 +130,23 @@ struct TaskDraft: Equatable {
             let oldDue = before.hasDueDate && before.includesTime ? before.dueDate : nil
             reminder.alarms = (reminder.alarms ?? []).filter { alarm in
                 if let date = alarm.absoluteDate { return date != oldDue }
+                if !hasDueDate && Self.isEarly(alarm) { return false }  // early reminders need a due
                 return alarm.proximity != .none || alarm.relativeOffset != 0
             } + (hasDueDate && includesTime ? [EKAlarm(relativeOffset: 0)] : [])
         }
         if hasDueDate {
             // Only rewrite recurrence the user changed, so rules we can't represent survive.
-            if recurrence != before.recurrence || repeatEnd != before.repeatEnd
-                || (recurrence == .custom && (customFrequency, customInterval) != (before.customFrequency, before.customInterval)) {
+            let ruleChanged = recurrence != before.recurrence
+                || (recurrence == .custom && (customFrequency, customInterval) != (before.customFrequency, before.customInterval))
+            if ruleChanged {
                 let rule = recurrence == .custom
                     ? EKRecurrenceRule(recurrenceWith: customFrequency, interval: customInterval, end: nil)
                     : recurrence.rule
                 rule?.recurrenceEnd = repeatEnd.map { EKRecurrenceEnd(end: $0) }
                 reminder.recurrenceRules = rule.map { [$0] }
+            } else if repeatEnd != before.repeatEnd, let rule = reminder.recurrenceRules?.first {
+                rule.recurrenceEnd = repeatEnd.map { EKRecurrenceEnd(end: $0) }  // end-only edit keeps weekdays etc.
+                reminder.recurrenceRules = [rule]
             }
         } else {
             reminder.recurrenceRules = nil  // EventKit requires a due date for recurrence
@@ -151,13 +156,19 @@ struct TaskDraft: Equatable {
         }
         if earlyReminder != before.earlyReminder {
             reminder.alarms = (reminder.alarms ?? []).filter { !Self.isEarly($0) }
-                + (earlyReminder.map { [EKAlarm(relativeOffset: -$0)] } ?? [])
+                + (hasDueDate ? earlyReminder.map { [EKAlarm(relativeOffset: -$0)] } ?? [] : [])
         }
         if location != before.location {
+            let old = (reminder.alarms ?? []).first { $0.structuredLocation != nil && $0.proximity != .none }
             reminder.alarms = (reminder.alarms ?? []).filter { $0.proximity == .none }
                 + (location.map { location in
-                    let place = EKStructuredLocation(title: location.title)
+                    var place = EKStructuredLocation(title: location.title)
                     place.geoLocation = CLLocation(latitude: location.latitude, longitude: location.longitude)
+                    // Same place: copy the original (it may lack geoLocation, which reads as 0,0).
+                    if let b = before.location, (b.title, b.latitude, b.longitude) == (location.title, location.latitude, location.longitude),
+                       let copy = old?.structuredLocation?.copy() as? EKStructuredLocation {
+                        place = copy
+                    }
                     place.radius = location.radius
                     let alarm = EKAlarm()
                     alarm.structuredLocation = place

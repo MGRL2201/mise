@@ -30,12 +30,12 @@ struct AddTaskIntent: AppIntent {
         }
         // Siri can't ask "Did you mean", so take the close match; no list creation from Siri.
         if q.listName == nil, let n = q.unknownList { q.listName = QuickAdd.closeMatch(n, in: writable.map(\.title)) }
+        if let due {
+            q.due = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: due)
+            q.recurrence = .none  // a parsed rule would repeat on the overridden date
+        }
         let r = store.newReminder()
         q.apply(to: r, lists: writable)
-        if let due {
-            r.dueDateComponents = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: due)
-            r.recurrenceRules = nil  // a parsed rule would repeat on the overridden date
-        }
         try store.save(r)
         return .result(dialog: "Added \(q.title) to mise.")
     }
