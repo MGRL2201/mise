@@ -167,7 +167,7 @@ struct TaskExtrasTests {
         try context.save()
 
         try TaskExtras.toggleSubtask(first.id, in: row, context: context)
-        #expect(try context.fetch(FetchDescriptor<TaskExtras>()).first?.subtasks.map(\.done) == [true, true])
+        #expect(try ModelContext(container).fetch(FetchDescriptor<TaskExtras>()).first?.subtasks.map(\.done) == [true, true])
         #expect(!context.hasChanges)
 
         try TaskExtras.toggleSubtask(UUID(), in: row, context: context)

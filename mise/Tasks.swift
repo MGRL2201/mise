@@ -475,6 +475,7 @@ struct TasksView: View {
     @ViewBuilder
     private func row(for reminder: EKReminder) -> some View {
         let id = reminder.calendarItemIdentifier
+        // ponytail: O(rows x extras) linear match per row; build a [reminderID: TaskExtras] dict per body pass if lists get large.
         let extra = TaskExtras.match(extras, id: id, externalID: reminder.calendarItemExternalIdentifier)
         let subtasks = extra?.subtasks ?? []
         let isExpanded = expanded.contains(id)
@@ -512,7 +513,9 @@ struct TasksView: View {
             }
             .buttonStyle(.plain)
             if !subtasks.isEmpty {
-                Text("\(subtasks.filter(\.done).count)/\(subtasks.count)").font(.caption).foregroundStyle(.secondary)
+                let done = subtasks.filter(\.done).count
+                Text("\(done)/\(subtasks.count)").font(.caption).foregroundStyle(.secondary)
+                    .accessibilityLabel("\(done) of \(subtasks.count) subtasks done")
                 // Custom chevron, not DisclosureGroup: its label tap would steal the row's tap-to-edit.
                 Button {
                     withAnimation { if isExpanded { expanded.remove(id) } else { expanded.insert(id) } }
