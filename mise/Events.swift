@@ -17,10 +17,29 @@ import SwiftUI
     }
     var events: [EKEvent] = []
 
+    // Settings keyed by EKCalendar.calendarIdentifier, persisted in UserDefaults (#27).
+    @ObservationIgnored private let defaults: UserDefaults
+    var hiddenCalendarIDs: Set<String> {
+        didSet {
+            defaults.set(Array(hiddenCalendarIDs), forKey: "calendar.hidden")
+            reloadEvents()
+        }
+    }
+    var colorOverrides: [String: Color.Resolved] {
+        didSet { defaults.set(try? JSONEncoder().encode(colorOverrides), forKey: "calendar.colors") }
+    }
+    var defaultCalendarID: String? {
+        didSet { defaults.set(defaultCalendarID, forKey: "calendar.default") }
+    }
+
     var hasAccess: Bool { status == .fullAccess }
 
-    init(eventStore: EKEventStore = EKEventStore()) {
+    init(eventStore: EKEventStore = EKEventStore(), defaults: UserDefaults = .standard) {
         self.eventStore = eventStore
+        self.defaults = defaults
+        hiddenCalendarIDs = Self.loadHidden(defaults)
+        colorOverrides = Self.loadColors(defaults)
+        defaultCalendarID = defaults.string(forKey: "calendar.default")
         status = EKEventStore.authorizationStatus(for: .event)
         let store = eventStore
         Task { [weak self] in
@@ -31,6 +50,21 @@ import SwiftUI
         }
     }
 
+    private static func loadHidden(_ defaults: UserDefaults) -> Set<String> {
+        Set(defaults.stringArray(forKey: "calendar.hidden") ?? [])
+    }
+
+    private static func loadColors(_ defaults: UserDefaults) -> [String: Color.Resolved] {
+        defaults.data(forKey: "calendar.colors").flatMap { try? JSONDecoder().decode([String: Color.Resolved].self, from: $0) } ?? [:]
+    }
+
+    /// Re-read after a backup restore rewrote UserDefaults; setting hiddenCalendarIDs reloads events.
+    func reloadSettings() {
+        colorOverrides = Self.loadColors(defaults)
+        defaultCalendarID = defaults.string(forKey: "calendar.default")
+        hiddenCalendarIDs = Self.loadHidden(defaults)
+    }
+
     func requestAccess() async {
         _ = try? await eventStore.requestFullAccessToEvents()
         await refresh()
@@ -39,24 +73,27 @@ import SwiftUI
     func refresh() async {
         status = EKEventStore.authorizationStatus(for: .event)
         guard hasAccess else {
-            calendars = []
+            withMutation(keyPath: \.calendars) { calendars = [] }
             events = []
             return
         }
         // Every account source (iCloud, Exchange/Outlook, local, subscribed).
-        calendars = eventStore.calendars(for: .event)
+        withMutation(keyPath: \.calendars) { calendars = eventStore.calendars(for: .event) }
         reloadEvents()
     }
 
-    // Refetched EKEvents are == the old ones (isEqual) even after an external
-    // edit, so a plain assignment skips @Observable's notify; force it (#126).
+    // Refetched EKEvents (and EKCalendars) are == the old ones (isEqual) even after an
+    // external edit, so a plain assignment skips @Observable's notify; force it (#126).
     private func reloadEvents() {
         withMutation(keyPath: \.events) { events = events(in: range) }
     }
 
     func events(in interval: DateInterval) -> [EKEvent] {
-        // ponytail: all calendars; #27 filters hidden ones here.
-        let predicate = eventStore.predicateForEvents(withStart: interval.start, end: interval.end, calendars: nil)
+        // nil = all calendars.
+        let visible = hiddenCalendarIDs.isEmpty ? nil : Self.visible(eventStore.calendars(for: .event), hidden: hiddenCalendarIDs)
+        // An empty calendars array would mean "all" to EventKit.
+        if visible?.isEmpty == true { return [] }
+        let predicate = eventStore.predicateForEvents(withStart: interval.start, end: interval.end, calendars: visible)
         return eventStore.events(matching: predicate).sorted { lhs, rhs in
             if lhs.startDate != rhs.startDate { return lhs.startDate < rhs.startDate }
             return (lhs.title ?? "") < (rhs.title ?? "")
@@ -65,8 +102,27 @@ import SwiftUI
 
     func newEvent(in calendar: EKCalendar? = nil) -> EKEvent {
         let event = EKEvent(eventStore: eventStore)
-        event.calendar = calendar ?? eventStore.defaultCalendarForNewEvents
+        event.calendar = calendar ?? defaultCalendar
         return event
+    }
+
+    static func visible(_ calendars: [EKCalendar], hidden: Set<String>) -> [EKCalendar] {
+        calendars.filter { !hidden.contains($0.calendarIdentifier) }
+    }
+
+    /// User's chosen default if it still exists and is writable, else the system default.
+    /// Looked up directly: `calendars` is empty until refresh() (#27).
+    var defaultCalendar: EKCalendar? {
+        if let chosen = defaultCalendarID.flatMap(eventStore.calendar(withIdentifier:)), chosen.allowsContentModifications {
+            return chosen
+        }
+        return eventStore.defaultCalendarForNewEvents
+    }
+
+    /// User override, else the calendar's own color; gray without a calendar.
+    func color(for calendar: EKCalendar?) -> Color {
+        guard let calendar else { return .gray }
+        return colorOverrides[calendar.calendarIdentifier].map { Color($0) } ?? Color(cgColor: calendar.cgColor)
     }
 
     // Reload rather than patch: a .futureEvents edit touches many occurrences.

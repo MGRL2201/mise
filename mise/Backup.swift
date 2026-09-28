@@ -7,8 +7,8 @@ import UniformTypeIdentifiers
 // ponytail: base64 JSON inflates ~33% and loads fully in memory; switch to AppleArchive/streaming if backups get large
 struct Backup: Codable {
     static let currentVersion = 2
-    /// UserDefaults keys owned by ThemeStore / AppLock.
-    static let settingsKeys = ["theme.palette", "lock.mode", "lock.grace"]
+    /// UserDefaults keys owned by ThemeStore / AppLock / CalendarStore.
+    static let settingsKeys = ["theme.palette", "lock.mode", "lock.grace", "calendar.hidden", "calendar.colors", "calendar.default"]
 
     var version: Int
     var createdAt: Date

@@ -102,8 +102,6 @@ extension EKEvent {
     func showsAllDay(on dayStart: Date, calendar: Calendar = .current) -> Bool {
         isAllDay || (startDate <= dayStart && endDate >= calendar.date(byAdding: .day, value: 1, to: dayStart)!)
     }
-
-    var color: Color { Color(cgColor: calendar.cgColor) }
 }
 
 /// Timed events of one day as positioned blocks, 24 * hourHeight tall; no hour labels
@@ -161,6 +159,7 @@ struct DayColumn: View {
 }
 
 private struct EventBlock: View {
+    @Environment(CalendarStore.self) private var store
     let event: EKEvent
     /// Narrow slot: clip to one line instead of wrapping per character.
     let compact: Bool
@@ -170,7 +169,7 @@ private struct EventBlock: View {
         let times = (event.startDate..<event.endDate).formatted(.interval.hour().minute())
         Button(action: action) {
             HStack(alignment: .top, spacing: 4) {
-                Rectangle().fill(event.color).frame(width: 3)
+                Rectangle().fill(store.color(for: event.calendar)).frame(width: 3)
                 VStack(alignment: .leading, spacing: 0) {
                     Text(event.title ?? "").font(.caption.weight(.semibold)).fixedSize(horizontal: compact, vertical: compact)
                     Text(times).font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: compact, vertical: compact)
@@ -178,7 +177,7 @@ private struct EventBlock: View {
                 Spacer(minLength: 0)
             }
             .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
-            .background(event.color.opacity(0.25))
+            .background(store.color(for: event.calendar).opacity(0.25))
             .clipShape(.rect(cornerRadius: 4))
         }
         .buttonStyle(.plain)
@@ -397,7 +396,7 @@ struct CalendarView: View {
                                 .lineLimit(1)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 4)
-                                .background(event.color.opacity(0.25), in: .capsule)
+                                .background(store.color(for: event.calendar).opacity(0.25), in: .capsule)
                         }
                         .buttonStyle(.plain)
                     }
@@ -444,7 +443,7 @@ struct CalendarView: View {
                                     .lineLimit(1)
                                     .padding(.horizontal, 6)
                                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                                    .background(event.color.opacity(0.25), in: .rect(cornerRadius: 4))
+                                    .background(store.color(for: event.calendar).opacity(0.25), in: .rect(cornerRadius: 4))
                             }
                             .buttonStyle(.plain)
                             .frame(width: width * CGFloat(span.count) - 2, height: rowHeight - 2)
@@ -464,6 +463,7 @@ struct CalendarView: View {
 
 /// Event details; Edit (writable calendars only) swaps the sheet to EventEditor in place.
 struct EventDetailView: View {
+    @Environment(CalendarStore.self) private var store
     let event: EKEvent
     @Environment(\.dismiss) private var dismiss
     @State private var editing = false
@@ -484,7 +484,7 @@ struct EventDetailView: View {
                     Label {
                         Text(event.calendar.title)
                     } icon: {
-                        Circle().fill(event.color).frame(width: 10, height: 10)
+                        Circle().fill(store.color(for: event.calendar)).frame(width: 10, height: 10)
                     }
                     if event.isAllDay {
                         Text("All day, \((event.startDate..<event.endDate).formatted(.interval.weekday().month().day()))")

@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct SettingsView: View {
     @Environment(ThemeStore.self) private var store
     @Environment(AppLock.self) private var lock
+    @Environment(CalendarStore.self) private var calendars
     @Environment(\.theme) private var theme
     @State private var editingDark = false
     @State private var stockAPIKeyInput = ""
@@ -223,6 +224,7 @@ struct SettingsView: View {
                 Data(contentsOf: url), context: modelContext, files: AttachmentFileStore(), defaults: .standard)
             store.reload()
             lock.reload()
+            calendars.reloadSettings()
         } catch {
             backupError = error.localizedDescription
         }
