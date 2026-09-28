@@ -105,6 +105,9 @@ struct ContentView: View {
             guard let route = Route(url: url) else { return }
             macSelection = route.destination
         }
+        #if DEBUG
+        .onAppear { if let debugTab { macSelection = debugTab } }
+        #endif
         #else
         TabView(selection: $tab) {
             Tab("Today", systemImage: Destination.today.systemImage, value: .today) {
@@ -140,8 +143,16 @@ struct ContentView: View {
             guard let route = Route(url: url) else { return }
             select(route.destination)
         }
+        #if DEBUG
+        .onAppear { if let debugTab { select(debugTab) } }
+        #endif
         #endif
     }
+
+    #if DEBUG
+    /// Screenshot hook: launch with `-miseTab calendar` to start on that destination.
+    private var debugTab: Destination? { UserDefaults.standard.string(forKey: "miseTab").flatMap(Destination.init) }
+    #endif
 
     private func detailView(for destination: Destination) -> some View {
         Group {
