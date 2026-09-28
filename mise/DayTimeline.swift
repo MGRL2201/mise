@@ -23,6 +23,12 @@ enum TimelineLayout {
         return calendar.date(bySettingHour: seconds / 3600, minute: seconds / 60 % 60, second: seconds % 60, of: dayStart)!
     }
 
+    /// Tap-to-create start: the half hour containing `y`, at most 23:30.
+    static func slotStart(forY y: CGFloat, dayStart: Date, calendar: Calendar = .current) -> Date {
+        let half = hourHeight / 2
+        return date(forY: min((y / half).rounded(.down), 47) * half, dayStart: dayStart, calendar: calendar)
+    }
+
     struct Slot: Equatable { var column: Int; var columnCount: Int }
 
     /// Side-by-side columns for overlapping intervals. Input order = output order.
@@ -71,6 +77,13 @@ enum DayGrid {
         calendar.date(byAdding: .day, value: pages * clamp(count), to: start)!
     }
 
+    /// "+" default start: the next whole hour; on a day other than today, that hour of `day`.
+    static func newEventStart(on day: Date, now: Date = .now, calendar: Calendar = .current) -> Date {
+        let next = calendar.dateInterval(of: .hour, for: now)!.end
+        if calendar.isDate(day, inSameDayAs: now) { return next }
+        return calendar.date(bySettingHour: calendar.component(.hour, from: next), minute: 0, second: 0, of: day)!
+    }
+
     /// Pinch out (zoom in) shows fewer days, pinch in shows more.
     static func count(afterPinch scale: CGFloat, from count: Int) -> Int {
         clamp(scale > 1.25 ? count - 1 : scale < 0.8 ? count + 1 : count)
@@ -99,6 +112,8 @@ struct DayColumn: View {
     let day: Date
     let events: [EKEvent]
     let onSelect: (EKEvent) -> Void
+    /// Tap on empty space: start of a new 1h event there.
+    let onCreate: (Date) -> Void
 
     /// The events touching `day`, split into all-day chips and timed blocks (input order kept).
     static func split(_ events: [EKEvent], day: Date, calendar: Calendar = .current) -> (allDay: [EKEvent], timed: [EKEvent]) {
@@ -112,6 +127,15 @@ struct DayColumn: View {
         let timed = Self.split(events, day: day).timed
         let slots = TimelineLayout.slots(for: timed.map { (start: $0.startDate, end: $0.endDate) })
         GeometryReader { geo in
+            // Behind the blocks, so taps on events still select them. Mac: double-click, like Calendar.app.
+            Color.clear
+                .contentShape(.rect)
+                #if os(macOS)
+                .onTapGesture(count: 2) { onCreate(TimelineLayout.slotStart(forY: $0.y, dayStart: day)) }
+                #else
+                .onTapGesture { onCreate(TimelineLayout.slotStart(forY: $0.y, dayStart: day)) }
+                #endif
+                .accessibilityHidden(true)
             ForEach(Array(zip(timed, slots)), id: \.0.rowID) { event, slot in
                 // Keep the 20pt minimum inside the 24h frame for short events near midnight.
                 let top = min(TimelineLayout.y(for: event.startDate, dayStart: day), 24 * TimelineLayout.hourHeight - 20)
@@ -196,18 +220,43 @@ struct CalendarView: View {
     @AppStorage("calendarDays") private var dayCount = 1
     @AppStorage("calendarMode") private var mode = CalendarMode.days
     @State private var selected: SelectedEvent?
+    #if DEBUG
+    @State private var openedNewEventHook = false
+    #endif
 
     private struct SelectedEvent: Identifiable {
         let event: EKEvent
-        var id: String { event.rowID }
+        // Object identity: rowID changes when a save moves the start or splits the series, which would re-present the sheet.
+        var id: ObjectIdentifier { ObjectIdentifier(event) }
     }
 
     var body: some View {
         content
             .navigationTitle("Calendar")
             .themedBackground()
+            .toolbar {
+                if store.hasAccess {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button("New Event", systemImage: "plus", action: createAtNextHour)
+                    }
+                }
+            }
             .task { await store.refresh() }
-            .sheet(item: $selected) { EventDetailView(event: $0.event) }
+            #if DEBUG
+            // Screenshot hook: launch with `-calendarNewEvent YES` to open the new-event editor.
+            .onAppear {
+                guard !openedNewEventHook, store.hasAccess, UserDefaults.standard.bool(forKey: "calendarNewEvent") else { return }
+                openedNewEventHook = true
+                createAtNextHour()
+            }
+            #endif
+            .sheet(item: $selected) { selection in
+                if selection.event.eventIdentifier?.isEmpty ?? true {  // unsaved, same check as EventEditor
+                    EventEditor(event: selection.event)
+                } else {
+                    EventDetailView(event: selection.event)
+                }
+            }
     }
 
     @ViewBuilder
@@ -251,6 +300,18 @@ struct CalendarView: View {
 
     private func select(_ event: EKEvent) { selected = SelectedEvent(event: event) }
 
+    private func create(at start: Date) {
+        let event = store.newEvent()
+        event.startDate = start
+        event.endDate = start.addingTimeInterval(3600)
+        selected = SelectedEvent(event: event)
+    }
+
+    /// "+": next whole hour on the first visible day (Days mode) or today.
+    private func createAtNextHour() {
+        create(at: DayGrid.newEventStart(on: mode == .days ? day : .now))
+    }
+
     private var timeline: some View {
         let days = days
         return VStack(spacing: 8) {
@@ -290,7 +351,7 @@ struct CalendarView: View {
                         HourGrid()
                         HStack(spacing: 0) {
                             ForEach(days, id: \.self) { day in
-                                DayColumn(day: day, events: store.events, onSelect: select)
+                                DayColumn(day: day, events: store.events, onSelect: select, onCreate: create)
                                     .overlay(alignment: .leading) {
                                         if day != days.first { Rectangle().fill(.separator).frame(width: 0.5) }
                                     }
@@ -401,12 +462,21 @@ struct CalendarView: View {
     }
 }
 
-/// Read-only event details; #26 replaces it with the editor.
+/// Event details; Edit (writable calendars only) swaps the sheet to EventEditor in place.
 struct EventDetailView: View {
     let event: EKEvent
     @Environment(\.dismiss) private var dismiss
+    @State private var editing = false
 
     var body: some View {
+        if editing {
+            EventEditor(event: event) { editing = false }
+        } else {
+            details
+        }
+    }
+
+    private var details: some View {
         NavigationStack {
             Form {
                 Section {
@@ -438,6 +508,9 @@ struct EventDetailView: View {
             .navigationTitle("Event")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                if event.calendar.allowsContentModifications {
+                    ToolbarItem(placement: .primaryAction) { Button("Edit") { editing = true } }
+                }
             }
         }
     }

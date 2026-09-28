@@ -36,6 +36,14 @@ struct TimelineLayoutTests {
         #expect(TimelineLayout.date(forY: 30 * h, dayStart: dayStart, calendar: calendar) == at(11, 0))
     }
 
+    @Test func slotStartRoundsDownToHalfHour() {
+        let start = { TimelineLayout.slotStart(forY: $0, dayStart: dayStart, calendar: calendar) }
+        #expect(start(9.9 * h) == at(10, 9, 30))
+        #expect(start(9.4 * h) == at(10, 9))
+        #expect(start(0) == dayStart)
+        #expect(start(24 * h) == at(10, 23, 30))
+    }
+
     @Test func slotsEmptyAndSingle() {
         #expect(slots([]) == [])
         #expect(slots([(9, 10)]) == [slot(0, 1)])

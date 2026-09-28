@@ -16,6 +16,14 @@ struct EventEditorTests {
         return event
     }
 
+    @Test func applyTrimsTitle() {
+        let event = event()
+        var draft = EventDraft(event)
+        draft.title = "  Dentist \n"
+        draft.apply(to: event, calendars: [])
+        #expect(event.title == "Dentist")
+    }
+
     @Test func draftRoundTripsThroughEvent() {
         let event = event()
         var draft = EventDraft(event)
