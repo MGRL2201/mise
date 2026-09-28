@@ -507,6 +507,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Config/Info.plist;
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "mise shows your calendar on Today and in widgets.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "mise uses your location to work out travel time to events.";
 				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "mise shows and edits your Apple Reminders as tasks.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Unlock mise with Face ID.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "mise listens when you dictate a task.";
@@ -558,6 +559,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Config/Info.plist;
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "mise shows your calendar on Today and in widgets.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "mise uses your location to work out travel time to events.";
 				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "mise shows and edits your Apple Reminders as tasks.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Unlock mise with Face ID.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "mise listens when you dictate a task.";

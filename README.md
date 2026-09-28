@@ -39,6 +39,11 @@ API keys (e.g. stock prices) are entered in the app at runtime and stored in
 the Keychain. Never commit keys; `*.xcconfig` files are git-ignored except the committed
 defaults in `*.shared.xcconfig`.
 
+## Known limitations
+
+- Leave-now travel time (ETA) only refreshes when the app opens, events change, or
+  background refresh runs (from the last known location), so it can be stale.
+
 ## Branch workflow
 
 - `main` — released/stable. Only updated by PR from `develop`.
