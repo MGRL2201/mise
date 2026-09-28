@@ -235,7 +235,16 @@ struct TaskEditor: View {
                     }
                     Toggle(isOn: Binding(get: { draft.hasDueDate && draft.includesTime }, set: {
                         draft.includesTime = $0
-                        if $0 { draft.hasDueDate = true }
+                        if $0 {
+                            draft.hasDueDate = true
+                            let calendar = Calendar.current
+                            let comps = calendar.dateComponents([.hour, .minute], from: draft.dueDate)
+                            if comps.hour == 0 && comps.minute == 0 {
+                                let isToday = calendar.isDateInToday(draft.dueDate)
+                                let hour = isToday ? calendar.component(.hour, from: .now) + 1 : 9
+                                draft.dueDate = calendar.date(bySettingHour: min(hour, 23), minute: 0, second: 0, of: draft.dueDate) ?? draft.dueDate
+                            }
+                        }
                     })) { Label("Time", systemImage: "clock") }
                     if draft.hasDueDate && draft.includesTime {
                         DatePicker("Time", selection: $draft.dueDate, displayedComponents: .hourAndMinute)
@@ -262,7 +271,7 @@ struct TaskEditor: View {
                             }
                             if let end = draft.repeatEnd {
                                 DatePicker("End Date", selection: Binding(get: { end }, set: { draft.repeatEnd = $0 }),
-                                           displayedComponents: .date)
+                                           in: draft.dueDate..., displayedComponents: .date)
                             }
                         }
                         Picker(selection: $draft.earlyReminder) {
@@ -336,8 +345,9 @@ struct TaskEditor: View {
                     }
                 }
                 Section {
-                    Toggle(isOn: $flagged) { Label("Flag", systemImage: "flag.fill") }
-                        .tint(.orange)
+                    Toggle(isOn: $flagged) {
+                        Label { Text("Flag") } icon: { Image(systemName: "flag.fill").foregroundStyle(.orange) }
+                    }
                 }
                 Section {
                     Picker("Priority", selection: $draft.priorityBucket) {

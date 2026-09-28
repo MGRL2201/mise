@@ -10,6 +10,7 @@ struct LocationSearchView: View {
     @State private var query = ""
     @State private var results: [MKMapItem] = []
     @State private var errorMessage: String?
+    @State private var search: Task<Void, Never>?
 
     var body: some View {
         List {
@@ -35,13 +36,18 @@ struct LocationSearchView: View {
         .navigationTitle("Location")
         .searchable(text: $query, prompt: "Search for a place")
         .onSubmit(of: .search) {
-            Task {
+            search?.cancel()
+            guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+            search = Task {
                 let request = MKLocalSearch.Request()
                 request.naturalLanguageQuery = query
                 do {
-                    results = try await MKLocalSearch(request: request).start().mapItems
-                    errorMessage = results.isEmpty ? "No places found." : nil
+                    let items = try await MKLocalSearch(request: request).start().mapItems
+                    guard !Task.isCancelled else { return }
+                    results = items
+                    errorMessage = items.isEmpty ? "No places found." : nil
                 } catch {
+                    guard !Task.isCancelled else { return }
                     results = []
                     errorMessage = error.localizedDescription
                 }
