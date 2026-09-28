@@ -40,4 +40,20 @@ struct PlanningTests {
         let kept = DailyPlanning.tasks(all, now: now, calendar: calendar) { $0.title == "linked" }
         #expect(kept.map(\.title) == ["overdue", "today"])
     }
+
+    @Test func tasksPutsOverdueTimedTaskBeforeDateOnlyTaskDueToday() {
+        let store = EKEventStore()
+        func reminder(_ title: String, due: DateComponents) -> EKReminder {
+            let r = EKReminder(eventStore: store)
+            r.title = title
+            r.dueDateComponents = due
+            return r
+        }
+        let now = at(10, 12)
+        let dateOnly = reminder("date-only", due: calendar.dateComponents([.year, .month, .day], from: at(10, 0)))
+        let timed = reminder("timed-9am", due: calendar.dateComponents([.year, .month, .day, .hour, .minute], from: at(10, 9)))
+        // Fed in the "wrong" order (date-only first) to prove the sort, not the input order, decides.
+        let kept = DailyPlanning.tasks([dateOnly, timed], now: now, calendar: calendar) { _ in false }
+        #expect(kept.map(\.title) == ["timed-9am", "date-only"])
+    }
 }

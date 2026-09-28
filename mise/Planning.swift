@@ -45,7 +45,12 @@ enum DailyPlanning {
                       isLinked: (EKReminder) -> Bool) -> [EKReminder] {
         TimeBlock.unscheduled(reminders, now: now, calendar: calendar, isLinked: isLinked)
             .compactMap { reminder in reminder.dueDateComponents.flatMap(calendar.date(from:)).map { (reminder, $0) } }
-            .sorted { $0.1 < $1.1 }
+            .sorted { lhs, rhs in
+                let lhsOverdue = TaskGrouping.dueBucket(lhs.0.dueDateComponents, now: now, calendar: calendar) == .overdue
+                let rhsOverdue = TaskGrouping.dueBucket(rhs.0.dueDateComponents, now: now, calendar: calendar) == .overdue
+                if lhsOverdue != rhsOverdue { return lhsOverdue }
+                return lhs.1 < rhs.1
+            }
             .map(\.0)
     }
 }
