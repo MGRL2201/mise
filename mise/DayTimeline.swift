@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 @preconcurrency import EventKit
 
 /// Pure geometry for the day timeline (#23); #24 N-day grid and #29 task drop reuse it.
@@ -112,6 +113,8 @@ struct DayColumn: View {
     let onSelect: (EKEvent) -> Void
     /// Tap on empty space: start of a new 1h event there.
     let onCreate: (Date) -> Void
+    /// Tray task dropped: its calendarItemIdentifier and the block start; true if blocked.
+    let onDropTask: (String, Date) -> Bool
 
     /// The events touching `day`, split into all-day chips and timed blocks (input order kept).
     static func split(_ events: [EKEvent], day: Date, calendar: Calendar = .current) -> (allDay: [EKEvent], timed: [EKEvent]) {
@@ -155,6 +158,10 @@ struct DayColumn: View {
             }
         }
         .frame(height: 24 * TimelineLayout.hourHeight)
+        // location is in the column's own space, i.e. timeline y.
+        .dropDestination(for: String.self) { ids, location in
+            ids.first.map { onDropTask($0, TimeBlock.dropInterval(atY: location.y, dayStart: day).start) } ?? false
+        }
     }
 }
 
@@ -213,6 +220,8 @@ struct HourGrid: View {
 /// Calendar tab: 1-7 days side by side as a timeline with all-day events above, or month / agenda (#25).
 struct CalendarView: View {
     @Environment(CalendarStore.self) private var store
+    @Environment(RemindersStore.self) private var reminders
+    @Environment(\.modelContext) private var modelContext
     @Environment(\.openURL) private var openURL
     /// First visible day.
     @State private var day = Calendar.current.startOfDay(for: .now)
@@ -244,7 +253,10 @@ struct CalendarView: View {
                     }
                 }
             }
-            .task { await store.refresh() }
+            .task {
+                await store.refresh()
+                await reminders.refresh()  // the tray needs tasks even if the Tasks tab was never opened
+            }
             #if DEBUG
             // Screenshot hook: launch with `-calendarNewEvent YES` to open the new-event editor.
             .onAppear {
@@ -318,6 +330,16 @@ struct CalendarView: View {
         create(at: DayGrid.newEventStart(on: mode == .days ? day : .now))
     }
 
+    /// Drop from the tray: block the task at `start` (or move its block); false if it can't.
+    private func dropTask(_ id: String, at start: Date) -> Bool {
+        guard let reminder = reminders.reminders.first(where: { $0.calendarItemIdentifier == id }),
+              (try? createTimeBlock(for: reminder, start: start, duration: TimeBlock.defaultDuration, calendar: nil,
+                                    calendarStore: store, context: modelContext)) != nil
+        else { return false }
+        Task { await store.refresh() }  // show the new block now
+        return true
+    }
+
     private var timeline: some View {
         let days = days
         return VStack(spacing: 8) {
@@ -345,6 +367,7 @@ struct CalendarView: View {
             }
             .labelStyle(.iconOnly)
             .padding(.horizontal)
+            UnscheduledTray()
             if count == 1 {
                 allDayChips
             } else {
@@ -357,7 +380,7 @@ struct CalendarView: View {
                         HourGrid()
                         HStack(spacing: 0) {
                             ForEach(days, id: \.self) { day in
-                                DayColumn(day: day, events: store.events, onSelect: select, onCreate: create)
+                                DayColumn(day: day, events: store.events, onSelect: select, onCreate: create, onDropTask: dropTask)
                                     .overlay(alignment: .leading) {
                                         if day != days.first { Rectangle().fill(.separator).frame(width: 0.5) }
                                     }
@@ -465,6 +488,49 @@ struct CalendarView: View {
             .padding(.leading, HourGrid.gutterWidth)
             .padding(.trailing, 4)
         }
+    }
+}
+
+/// Open tasks without a time block (today, overdue, undated), dragged onto a day column to block them (#29).
+private struct UnscheduledTray: View {
+    @Environment(RemindersStore.self) private var reminders
+    @Environment(CalendarStore.self) private var calendarStore
+    @Query private var extras: [TaskExtras]
+    @AppStorage("calendarTrayExpanded") private var expanded = true
+
+    var body: some View {
+        // Read so a deleted linked event (refresh replaces events) puts its task back in the tray.
+        let _ = calendarStore.events
+        let tasks = TimeBlock.unscheduled(reminders.reminders, now: .now) { reminder in
+            TaskExtras.match(extras, id: reminder.calendarItemIdentifier, externalID: reminder.calendarItemExternalIdentifier)?
+                .eventID.flatMap { calendarStore.eventStore.event(withIdentifier: $0) } != nil
+        }
+        if reminders.hasAccess && !tasks.isEmpty {
+            DisclosureGroup("Unscheduled (\(tasks.count))", isExpanded: $expanded) {
+                ScrollView(.horizontal) {
+                    HStack {
+                        ForEach(tasks, id: \.calendarItemIdentifier) { reminder in
+                            let title = reminder.title ?? ""
+                            chip(title)
+                                .draggable(reminder.calendarItemIdentifier) { chip(title) }
+                                .accessibilityLabel("\(title), drag onto the timeline")
+                        }
+                    }
+                }
+                .scrollIndicators(.hidden)
+            }
+            .font(.subheadline)
+            .padding(.horizontal)
+        }
+    }
+
+    private func chip(_ title: String) -> some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .lineLimit(1)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(.tint.opacity(0.2), in: .capsule)
     }
 }
 

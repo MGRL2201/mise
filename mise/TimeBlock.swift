@@ -11,6 +11,25 @@ enum TimeBlock {
         let bare = title.hasPrefix(doneMark) ? String(title.dropFirst(doneMark.count)) : title
         return done ? doneMark + bare : bare
     }
+
+    /// Length of a block made by dropping a task on the timeline; #30 estimates replace it.
+    static let defaultDuration: TimeInterval = 30 * 60
+
+    /// Block for a task dropped at `y` in the day column: the half hour containing it.
+    static func dropInterval(atY y: CGFloat, dayStart: Date, calendar: Calendar = .current) -> DateInterval {
+        DateInterval(start: TimelineLayout.slotStart(forY: y, dayStart: dayStart, calendar: calendar), duration: defaultDuration)
+    }
+
+    /// Calendar tray tasks: open, not yet blocked, and undated, overdue or due today. Input order kept.
+    static func unscheduled(_ reminders: [EKReminder], now: Date, calendar: Calendar = .current,
+                            isLinked: (EKReminder) -> Bool) -> [EKReminder] {
+        reminders.filter { reminder in
+            guard !reminder.isCompleted, !isLinked(reminder) else { return false }
+            guard let due = reminder.dueDateComponents else { return true }
+            let bucket = TaskGrouping.dueBucket(due, now: now, calendar: calendar)
+            return bucket == .overdue || bucket == .today
+        }
+    }
 }
 
 /// Creates an event for `reminder` and links it, or moves the already linked event
