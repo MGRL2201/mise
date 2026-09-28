@@ -348,6 +348,7 @@ struct TaskEditor: View {
                     Toggle(isOn: $flagged) {
                         Label { Text("Flag") } icon: { Image(systemName: "flag.fill").foregroundStyle(.orange) }
                     }
+                    .tint(.orange)
                 }
                 Section {
                     Picker("Priority", selection: $draft.priorityBucket) {
