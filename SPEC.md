@@ -217,10 +217,16 @@ and documented here.
 ### 6.2 Tasks and reminders
 
 - Backed by **Apple Reminders via EventKit**: title, notes, due date/time,
-  priority, lists, recurrence, time alarms, completion. Two-way sync with the
-  Reminders app, including deletion in both directions.
-- **Subtasks and tags** (not exposed by EventKit) are stored in the app, linked
-  by reminder identifier. They are not visible in Apple Reminders.
+  priority, lists, recurrence (with end repeat date), time alarms, early
+  reminders (relative alarms before a timed due), completion. URL is an
+  EventKit field that Reminders.app may not show. Two-way sync
+  with the Reminders app, including deletion in both directions. The editor
+  follows the order of Reminders' Details screen.
+- **Location reminders:** arriving at or leaving a place picked via Apple Maps
+  search. EventKit and Reminders do the geofencing, so mise needs no location
+  permission.
+- **Subtasks, tags and Flag** (not exposed by EventKit) are stored in the app,
+  linked by reminder identifier. They are not visible in Apple Reminders.
 - **Optional time-blocking** per task: pick start, duration, and calendar
   (Apple or Outlook); mise creates an event linked to the task. Completing the
   task updates the linked event.
@@ -230,7 +236,6 @@ and documented here.
   e.g. "pay rent every 1st 9am !high".
 - **Siri / Shortcuts** via App Intents (spike #12, §12).
 - **Widget** with interactive check-off.
-- Excluded from v1: location-based reminders.
 
 ### 6.3 Planner and calendar
 
@@ -364,7 +369,6 @@ Xcode with the free Personal Team (see §2.2). Built in Phase 9.
 ## 7. Deferred / v2
 
 - Split transactions (Finance).
-- Location-based reminders (Tasks).
 - Attendees and invites (Calendar).
 - CloudKit sync and removal of 7-day signing (requires paid developer account).
 

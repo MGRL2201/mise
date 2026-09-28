@@ -48,6 +48,7 @@ final class TaskExtras {
     // ponytail: eventIdentifier can change when the event is moved between calendars outside mise,
     // losing the link; upgrade path = also store the event's calendarItemExternalIdentifier as fallback.
     var eventID: String?
+    var flagged = false
 
     init(reminderID: String, externalID: String?) {
         self.reminderID = reminderID
@@ -60,17 +61,19 @@ final class TaskExtras {
         return all.first { $0.externalID == externalID }
     }
 
-    /// Writes the editor's draft for a saved reminder: replaces subtasks and tags on the
-    /// matching row, creating one only when there is something to store. Saves.
+    /// Writes the editor's draft for a saved reminder: replaces tags (and flag, unless nil) on the matching row,
+    /// creating one only when there is something to store. Subtasks are 3-way merged against the
+    /// stored ones when `base` (what the editor loaded) is given, else replaced. Saves.
     static func write(in context: ModelContext, reminderID: String, externalID: String?,
-                      subtasks: [Subtask], tagNames: [String]) throws {
-        let subtasks = subtasks.filter { !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                      subtasks: [Subtask], tagNames: [String], flagged: Bool? = nil, base: [Subtask]? = nil) throws {
         var tags: [Tag] = []
         for name in tagNames {
             if let tag = try Tag.named(name, in: context), !tags.contains(where: { $0 === tag }) { tags.append(tag) }
         }
         var row = match(try context.fetch(FetchDescriptor<TaskExtras>()), id: reminderID, externalID: externalID)
-        if row == nil, !subtasks.isEmpty || !tags.isEmpty {
+        let merged = if let base, let row { merge(base: base, mine: subtasks, theirs: row.subtasks) } else { subtasks }
+        let subtasks = merged.filter { !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        if row == nil, !subtasks.isEmpty || !tags.isEmpty || flagged == true {
             row = TaskExtras(reminderID: reminderID, externalID: externalID)
             context.insert(row!)
         }
@@ -79,8 +82,24 @@ final class TaskExtras {
             row.externalID = externalID
             row.subtasks = subtasks
             row.tags = tags
+            if let flagged { row.flagged = flagged }
         }
         do { try context.save() } catch { context.rollback(); throw error }
+    }
+
+    /// 3-way merge of subtask lists: base = what the editor loaded, mine = the editor's list,
+    /// theirs = what is stored now. Per field, my change wins, else theirs. Order = mine, then theirs' additions.
+    static func merge(base: [Subtask], mine: [Subtask], theirs: [Subtask]) -> [Subtask] {
+        let base = Dictionary(base.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let theirsByID = Dictionary(theirs.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let mineIDs = Set(mine.map(\.id))
+        return mine.compactMap { item in
+            guard let old = base[item.id] else { return item }  // added by me
+            guard var merged = theirsByID[item.id] else { return (item.title, item.done) == (old.title, old.done) ? nil : item }  // deleted elsewhere
+            if item.title != old.title { merged.title = item.title }
+            if item.done != old.done { merged.done = item.done }
+            return merged
+        } + theirs.filter { !base.keys.contains($0.id) && !mineIDs.contains($0.id) }
     }
 
     /// Flips one subtask's done flag; unknown ids are a no-op. Saves.
@@ -122,6 +141,7 @@ final class TaskExtras {
                 if let owner = owners[id], owner !== extras {
                     owner.subtasks += extras.subtasks
                     owner.eventID = owner.eventID ?? extras.eventID
+                    owner.flagged = owner.flagged || extras.flagged
                     owner.tags = (owner.tags ?? []) + (extras.tags ?? []).filter { tag in
                         !(owner.tags ?? []).contains { $0 === tag }
                     }

@@ -1,8 +1,10 @@
 import SwiftUI
 import SwiftData
 @preconcurrency import EventKit
+import CoreLocation
 
-// ponytail: custom = frequency + "every N" only; end dates and specific weekdays aren't editable yet (existing ones survive untouched).
+// ponytail: custom = frequency + "every N" only; specific weekdays and occurrence-count ends aren't editable yet
+// (existing ones survive untouched). End dates are editable via TaskDraft.repeatEnd.
 enum RecurrencePreset: String, CaseIterable {
     case none = "Never", daily = "Daily", weekdays = "Weekdays", weekly = "Weekly", biweekly = "Every 2 Weeks"
     case monthly = "Monthly", yearly = "Yearly", custom = "Custom"
@@ -34,9 +36,18 @@ enum RecurrencePreset: String, CaseIterable {
         let extras = { (r: EKRecurrenceRule) in
             [r.daysOfTheMonth, r.monthsOfTheYear, r.weeksOfTheYear, r.daysOfTheYear, r.setPositions].allSatisfy { ($0 ?? []).isEmpty }
         }
-        return a.frequency == b.frequency && a.interval == b.interval && b.recurrenceEnd == nil
+        return a.frequency == b.frequency && a.interval == b.interval && (b.recurrenceEnd?.occurrenceCount ?? 0) == 0
             && days(a) == days(b) && extras(b)
     }
+}
+
+/// A geofence alarm: notify on arriving at (or leaving) a place.
+struct LocationReminder: Equatable {
+    var title: String
+    var latitude: Double
+    var longitude: Double
+    var radius: Double
+    var leaving: Bool
 }
 
 /// Plain editable copy of a reminder; nothing touches EventKit until `apply`.
@@ -51,7 +62,17 @@ struct TaskDraft: Equatable {
     var recurrence = RecurrencePreset.none
     var customFrequency = EKRecurrenceFrequency.daily
     var customInterval = 1
-    var alarms: [Date] = []
+    var repeatEnd: Date?
+    var url = ""
+    /// Seconds before due (positive).
+    var earlyReminder: TimeInterval?
+    var location: LocationReminder?
+
+    static let earlyReminderOptions: [TimeInterval] = [300, 900, 1800, 3600, 7200, 86400, 2 * 86400, 7 * 86400, 30 * 86400]
+
+    private static func isEarly(_ alarm: EKAlarm) -> Bool {
+        alarm.absoluteDate == nil && alarm.proximity == .none && alarm.relativeOffset < 0
+    }
 
     init(_ reminder: EKReminder) {
         title = reminder.title ?? ""
@@ -69,7 +90,16 @@ struct TaskDraft: Equatable {
             customFrequency = rule.frequency
             customInterval = rule.interval
         }
-        alarms = (reminder.alarms ?? []).compactMap(\.absoluteDate)
+        repeatEnd = rule?.recurrenceEnd?.endDate
+        url = reminder.url?.absoluteString ?? ""
+        let alarms = reminder.alarms ?? []
+        earlyReminder = alarms.first(where: Self.isEarly).map { -$0.relativeOffset }
+        if let alarm = alarms.first(where: { $0.structuredLocation != nil && $0.proximity != .none }),
+           let place = alarm.structuredLocation {
+            location = LocationReminder(
+                title: place.title ?? "", latitude: place.geoLocation?.coordinate.latitude ?? 0,
+                longitude: place.geoLocation?.coordinate.longitude ?? 0, radius: place.radius, leaving: alarm.proximity == .leave)
+        }
     }
 
     /// Picker-facing priority; setting the bucket the raw value already falls in keeps it (e.g. 3 stays 3).
@@ -96,22 +126,56 @@ struct TaskDraft: Equatable {
             let fields: Set<Calendar.Component> = includesTime ? [.year, .month, .day, .hour, .minute] : [.year, .month, .day]
             reminder.dueDateComponents = hasDueDate ? Calendar.current.dateComponents(fields, from: dueDate) : nil
             reminder.startDateComponents = nil
+            // Timed dues notify at the due time like Reminders.app: drop the old due's alarm, keep others.
+            let oldDue = before.hasDueDate && before.includesTime ? before.dueDate : nil
+            reminder.alarms = (reminder.alarms ?? []).filter { alarm in
+                if let date = alarm.absoluteDate { return date != oldDue }
+                // Early reminders need a timed due; on a date-only due they'd fire relative to midnight.
+                if !(hasDueDate && includesTime) && Self.isEarly(alarm) { return false }
+                return alarm.proximity != .none || alarm.relativeOffset != 0
+            } + (hasDueDate && includesTime ? [EKAlarm(relativeOffset: 0)] : [])
         }
         if hasDueDate {
             // Only rewrite recurrence the user changed, so rules we can't represent survive.
-            if recurrence != before.recurrence
-                || (recurrence == .custom && (customFrequency, customInterval) != (before.customFrequency, before.customInterval)) {
+            let ruleChanged = recurrence != before.recurrence
+                || (recurrence == .custom && (customFrequency, customInterval) != (before.customFrequency, before.customInterval))
+            if ruleChanged {
                 let rule = recurrence == .custom
                     ? EKRecurrenceRule(recurrenceWith: customFrequency, interval: customInterval, end: nil)
                     : recurrence.rule
+                rule?.recurrenceEnd = repeatEnd.map { EKRecurrenceEnd(end: $0) }
                 reminder.recurrenceRules = rule.map { [$0] }
+            } else if repeatEnd != before.repeatEnd, let rule = reminder.recurrenceRules?.first {
+                rule.recurrenceEnd = repeatEnd.map { EKRecurrenceEnd(end: $0) }  // end-only edit keeps weekdays etc.
+                reminder.recurrenceRules = [rule]
             }
         } else {
             reminder.recurrenceRules = nil  // EventKit requires a due date for recurrence
         }
-        if alarms != before.alarms {
-            let kept = (reminder.alarms ?? []).filter { $0.absoluteDate == nil }
-            reminder.alarms = kept + alarms.map { EKAlarm(absoluteDate: $0) }
+        if url != before.url {
+            reminder.url = URL(string: url.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        if earlyReminder != before.earlyReminder {
+            reminder.alarms = (reminder.alarms ?? []).filter { !Self.isEarly($0) }
+                + (hasDueDate && includesTime ? earlyReminder.map { [EKAlarm(relativeOffset: -$0)] } ?? [] : [])
+        }
+        if location != before.location {
+            let old = (reminder.alarms ?? []).first { $0.structuredLocation != nil && $0.proximity != .none }
+            reminder.alarms = (reminder.alarms ?? []).filter { $0.proximity == .none }
+                + (location.map { location in
+                    var place = EKStructuredLocation(title: location.title)
+                    place.geoLocation = CLLocation(latitude: location.latitude, longitude: location.longitude)
+                    // Same place: copy the original (it may lack geoLocation, which reads as 0,0).
+                    if let b = before.location, (b.title, b.latitude, b.longitude) == (location.title, location.latitude, location.longitude),
+                       let copy = old?.structuredLocation?.copy() as? EKStructuredLocation {
+                        place = copy
+                    }
+                    place.radius = location.radius
+                    let alarm = EKAlarm()
+                    alarm.structuredLocation = place
+                    alarm.proximity = location.leaving ? .leave : .enter
+                    return [alarm]
+                } ?? [])
         }
     }
 }
@@ -129,6 +193,9 @@ struct TaskEditor: View {
     @State private var newSubtask = ""
     @State private var newTag = ""
     @State private var loadedExtras = false
+    @State private var flagged = false
+    @State private var loadedFlagged = false
+    @State private var loadedSubtasks: [Subtask] = []
     @State private var errorMessage: String?
     @State private var confirmingDelete = false
     @State private var timeBlocked = false
@@ -152,16 +219,42 @@ struct TaskEditor: View {
                 Section {
                     TextField("Title", text: $draft.title)
                     TextField("Notes", text: $draft.notes, axis: .vertical)
+                    TextField("URL", text: $draft.url)
+                        #if os(iOS)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        #endif
+                        .autocorrectionDisabled()
                 }
                 Section {
-                    Toggle("Due Date", isOn: $draft.hasDueDate)
+                    Toggle(isOn: Binding(get: { draft.hasDueDate }, set: {
+                        draft.hasDueDate = $0
+                        if !$0 { draft.includesTime = false }
+                    })) { Label("Date", systemImage: "calendar") }
                     if draft.hasDueDate {
-                        Toggle("Include Time", isOn: $draft.includesTime)
-                        DatePicker("Due", selection: $draft.dueDate,
-                                   displayedComponents: draft.includesTime ? [.date, .hourAndMinute] : .date)
-                        Picker("Repeat", selection: $draft.recurrence) {
-                            ForEach(RecurrencePreset.allCases, id: \.self) { Text($0.rawValue) }
+                        DatePicker("Date", selection: $draft.dueDate, displayedComponents: .date)
+                    }
+                    Toggle(isOn: Binding(get: { draft.hasDueDate && draft.includesTime }, set: {
+                        let wasDated = draft.hasDueDate
+                        draft.includesTime = $0
+                        if $0 {
+                            draft.hasDueDate = true
+                            let calendar = Calendar.current
+                            let comps = calendar.dateComponents([.hour, .minute], from: draft.dueDate)
+                            if !wasDated || comps.hour == 0 && comps.minute == 0 {
+                                let isToday = calendar.isDateInToday(draft.dueDate)
+                                let hour = isToday ? calendar.component(.hour, from: .now) + 1 : 9
+                                draft.dueDate = calendar.date(bySettingHour: min(hour, 23), minute: 0, second: 0, of: draft.dueDate) ?? draft.dueDate
+                            }
                         }
+                    })) { Label("Time", systemImage: "clock") }
+                    if draft.hasDueDate && draft.includesTime {
+                        DatePicker("Time", selection: $draft.dueDate, displayedComponents: .hourAndMinute)
+                    }
+                    if draft.hasDueDate {
+                        Picker(selection: $draft.recurrence) {
+                            ForEach(RecurrencePreset.allCases, id: \.self) { Text($0.rawValue) }
+                        } label: { Label("Repeat", systemImage: "repeat") }
                         if draft.recurrence == .custom {
                             Picker("Frequency", selection: $draft.customFrequency) {
                                 Text("Daily").tag(EKRecurrenceFrequency.daily)
@@ -171,32 +264,27 @@ struct TaskEditor: View {
                             }
                             Stepper("Every \(draft.customInterval)", value: $draft.customInterval, in: 1...99)
                         }
-                    }
-                }
-                Section {
-                    Picker("Priority", selection: $draft.priorityBucket) {
-                        ForEach(TaskGrouping.Priority.allCases, id: \.self) { Text($0.rawValue) }
-                    }
-                    Picker("List", selection: $draft.listID) {
-                        ForEach(store.lists.filter(\.allowsContentModifications), id: \.calendarIdentifier) { list in
-                            Text(list.title).tag(Optional(list.calendarIdentifier))
+                        if draft.recurrence != .none {
+                            Picker("End Repeat", selection: Binding(get: { draft.repeatEnd != nil }, set: {
+                                draft.repeatEnd = $0 ? Calendar.current.date(byAdding: .month, value: 1, to: draft.dueDate) : nil
+                            })) {
+                                Text("Never").tag(false)
+                                Text("On Date").tag(true)
+                            }
+                            if let end = draft.repeatEnd {
+                                DatePicker("End Date", selection: Binding(get: { end }, set: { draft.repeatEnd = $0 }),
+                                           in: draft.dueDate..., displayedComponents: .date)
+                            }
                         }
                     }
-                }
-                Section("Alarms") {
-                    ForEach(Array(draft.alarms.enumerated()), id: \.offset) { index, alarm in
-                        HStack {
-                            DatePicker("Alarm", selection: Binding(
-                                get: { alarm },
-                                set: { if draft.alarms.indices.contains(index) { draft.alarms[index] = $0 } }
-                            ))
-                            Button("Remove Alarm", systemImage: "minus.circle.fill") { draft.alarms.remove(at: index) }
-                                .labelStyle(.iconOnly)
-                                .buttonStyle(.borderless)
-                        }
-                    }
-                    Button("Add Alarm") {
-                        draft.alarms.append(draft.hasDueDate ? draft.dueDate : .now.addingTimeInterval(3600))
+                    if draft.hasDueDate && draft.includesTime {
+                        Picker(selection: $draft.earlyReminder) {
+                            Text("None").tag(TimeInterval?.none)
+                            let options = TaskDraft.earlyReminderOptions
+                            ForEach(options + (draft.earlyReminder.map { options.contains($0) ? [] : [$0] } ?? []), id: \.self) { seconds in
+                                Text(Self.earlyLabel(seconds)).tag(Optional(seconds))
+                            }
+                        } label: { Label("Early Reminder", systemImage: "bell") }
                     }
                 }
                 Section("Time Block") {
@@ -218,6 +306,63 @@ struct TaskEditor: View {
                     } else {
                         Text("Calendar access is off. Turn it on in Settings to time-block tasks.")
                             .foregroundStyle(.secondary)
+                    }
+                }
+                Section("Tags") {
+                    ForEach(tagNames, id: \.self) { name in
+                        HStack {
+                            Text(name)
+                            Spacer()
+                            Button("Remove Tag \(name)", systemImage: "minus.circle.fill") { tagNames.removeAll { $0 == name } }
+                                .labelStyle(.iconOnly)
+                                .buttonStyle(.borderless)
+                        }
+                    }
+                    TextField("Add Tag", text: $newTag)
+                        .onSubmit {
+                            addTag(newTag)
+                            newTag = ""
+                        }
+                    let available = allTags.map(\.name).filter { !hasTag($0) }
+                    if !available.isEmpty {
+                        Menu("Existing Tags") {
+                            ForEach(available, id: \.self) { name in Button(name) { addTag(name) } }
+                        }
+                    }
+                }
+                Section {
+                    NavigationLink {
+                        LocationSearchView(location: $draft.location)
+                    } label: {
+                        LabeledContent {
+                            Text(draft.location?.title ?? "None")
+                        } label: { Label("Location", systemImage: "location") }
+                    }
+                    if let location = draft.location {
+                        Picker("Location", selection: Binding(get: { location.leaving }, set: { draft.location?.leaving = $0 })) {
+                            Text("Arriving").tag(false)
+                            Text("Leaving").tag(true)
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        Button("Remove Location", role: .destructive) { draft.location = nil }
+                            .foregroundStyle(.red)
+                    }
+                }
+                Section {
+                    Toggle(isOn: $flagged) {
+                        Label { Text("Flag") } icon: { Image(systemName: "flag.fill").foregroundStyle(.orange) }
+                    }
+                    .tint(.orange)
+                }
+                Section {
+                    Picker("Priority", selection: $draft.priorityBucket) {
+                        ForEach(TaskGrouping.Priority.allCases, id: \.self) { Text($0.rawValue) }
+                    }
+                    Picker("List", selection: $draft.listID) {
+                        ForEach(store.lists.filter(\.allowsContentModifications), id: \.calendarIdentifier) { list in
+                            Text(list.title).tag(Optional(list.calendarIdentifier))
+                        }
                     }
                 }
                 Section {
@@ -258,31 +403,10 @@ struct TaskEditor: View {
                         #endif
                     }
                 }
-                Section("Tags") {
-                    ForEach(tagNames, id: \.self) { name in
-                        HStack {
-                            Text(name)
-                            Spacer()
-                            Button("Remove Tag \(name)", systemImage: "minus.circle.fill") { tagNames.removeAll { $0 == name } }
-                                .labelStyle(.iconOnly)
-                                .buttonStyle(.borderless)
-                        }
-                    }
-                    TextField("Add Tag", text: $newTag)
-                        .onSubmit {
-                            addTag(newTag)
-                            newTag = ""
-                        }
-                    let available = allTags.map(\.name).filter { !hasTag($0) }
-                    if !available.isEmpty {
-                        Menu("Existing Tags") {
-                            ForEach(available, id: \.self) { name in Button(name) { addTag(name) } }
-                        }
-                    }
-                }
                 if !isNew {
                     Section {
                         Button("Delete Task", role: .destructive) { confirmingDelete = true }
+                            .foregroundStyle(.red)
                     }
                 }
             }
@@ -304,7 +428,8 @@ struct TaskEditor: View {
                             try store.save(reminder)
                             try TaskExtras.write(in: modelContext, reminderID: reminder.calendarItemIdentifier,
                                                  externalID: reminder.calendarItemExternalIdentifier,
-                                                 subtasks: subtasks, tagNames: tagNames)
+                                                 subtasks: subtasks, tagNames: tagNames,
+                                                 flagged: flagged != loadedFlagged ? flagged : nil, base: loadedSubtasks)
                             if timeBlocked {
                                 if loadedBlock.map({ ($0.start, $0.minutes, $0.calendarID) != (blockStart, blockMinutes, blockCalendarID) }) ?? true {
                                     try createTimeBlock(for: reminder, start: blockStart, duration: TimeInterval(blockMinutes * 60),
@@ -325,6 +450,9 @@ struct TaskEditor: View {
                 let extras = TaskExtras.match((try? modelContext.fetch(FetchDescriptor<TaskExtras>())) ?? [], id: reminder.calendarItemIdentifier,
                                               externalID: reminder.calendarItemExternalIdentifier)
                 subtasks = extras?.subtasks ?? []
+                loadedSubtasks = subtasks
+                flagged = extras?.flagged ?? false
+                loadedFlagged = flagged
                 tagNames = (extras?.tags ?? []).map(\.name).sorted()
                 if let event = store.linkedEvent(for: reminder) {
                     timeBlocked = true
@@ -360,6 +488,11 @@ struct TaskEditor: View {
                 Text(message)
             }
         }
+    }
+
+    static func earlyLabel(_ seconds: TimeInterval) -> String {
+        seconds == 30 * 86400 ? "1 month before"
+            : Duration.seconds(seconds).formatted(.units(allowed: [.weeks, .days, .hours, .minutes], width: .wide)) + " before"
     }
 
     private func hasTag(_ name: String) -> Bool {

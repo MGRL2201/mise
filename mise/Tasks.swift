@@ -512,6 +512,10 @@ struct TasksView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            if extra?.flagged == true {
+                Image(systemName: "flag.fill").foregroundStyle(.orange)
+                    .accessibilityLabel("Flagged")
+            }
             if !subtasks.isEmpty {
                 let done = subtasks.filter(\.done).count
                 Text("\(done)/\(subtasks.count)").font(.caption).foregroundStyle(.secondary)

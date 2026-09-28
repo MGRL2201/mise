@@ -43,6 +43,7 @@ struct AddTaskIntentTests {
         #expect(reminder.title == "mise intent test \(id)")
         let c = try #require(reminder.dueDateComponents)
         #expect([c.year, c.month, c.day, c.hour, c.minute] == [2030, 1, 2, 9, 30])
+        #expect(reminder.alarms?.filter { $0.absoluteDate == nil && $0.relativeOffset == 0 }.count == 1)
     }
 
     @Test(.enabled(if: EKEventStore.authorizationStatus(for: .reminder) == .fullAccess))

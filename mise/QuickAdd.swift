@@ -242,6 +242,9 @@ struct QuickAdd: Equatable {
         reminder.priority = priority
         reminder.dueDateComponents = due
         reminder.recurrenceRules = due == nil ? nil : recurrence.rule.map { [$0] }
+        if due?.hour != nil, (reminder.alarms ?? []).isEmpty {
+            reminder.alarms = [EKAlarm(relativeOffset: 0)]  // timed tasks notify at due, like Reminders.app
+        }
         if let list = lists.first(where: { $0.title == listName }) {
             reminder.calendar = list
         }

@@ -78,6 +78,14 @@ struct QuickAddTests {
         #expect([due?.year, due?.month, due?.day, due?.hour, due?.minute] == [2026, 10, 1, 9, 0])
         #expect(RecurrencePreset(reminder.recurrenceRules?.first) == .monthly)
         #expect(reminder.calendar?.title == "Bills")
+        #expect(reminder.alarms?.count == 1 && reminder.alarms?.first?.relativeOffset == 0)
+        #expect(reminder.alarms?.first?.absoluteDate == nil)
+    }
+
+    @Test func dateOnlyQuickAddGetsNoAlarm() {
+        let reminder = EKReminder(eventStore: EKEventStore())
+        QuickAdd(title: "pay card", due: Self.day(9, 27)).apply(to: reminder, lists: [])
+        #expect((reminder.alarms ?? []).isEmpty)
     }
 
     @Test func mergingKeepsDeterministicFields() {
