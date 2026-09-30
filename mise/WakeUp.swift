@@ -257,6 +257,7 @@ enum WakeAlarms {
     /// restore) or with an older `configuration`, and cancels weekly AlarmKit alarms with no on-alarm.
     /// Pending `.fixed` re-rings are left alone.
     static func sync(_ alarms: [WakeAlarm]) async {
+        guard !Storage.inMemory else { return }  // empty in-memory list would cancel the user's real AlarmKit alarms
         guard AlarmManager.shared.authorizationState == .authorized,
               let scheduled = try? AlarmManager.shared.alarms else { return }
         let on = alarms.filter(\.isOn)

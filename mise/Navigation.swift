@@ -202,6 +202,13 @@ struct ContentView: View {
             } else if destination == .money && lock.mode == .financeAndNotes && !lock.isUnlocked {
                 // ponytail: Notes isn't gated; per-note lock (Phase 5, SPEC §6.5) will reuse AppLock.isUnlocked.
                 LockView()
+            } else if destination == .money {
+                #if os(macOS)
+                // Mac detail column has no NavigationStack; account rows push onto this one.
+                NavigationStack { FinanceView() }
+                #else
+                FinanceView()
+                #endif
             } else {
                 PlaceholderView(destination: destination)
             }

@@ -17,6 +17,13 @@ enum Storage {
         Transfer.self,
     ]
 
+    /// DEBUG `-miseSeedFinance YES`: in-memory seeded store; shared side effects (backup, AlarmKit) must skip.
+    #if DEBUG
+    static let inMemory = UserDefaults.standard.bool(forKey: "miseSeedFinance")
+    #else
+    static let inMemory = false
+    #endif
+
     /// `groupContainer: .none`: the default (.automatic) moves the store into
     /// the App Group once that entitlement exists (#10). Keep it app-private.
     static let configuration = ModelConfiguration(schema: Schema(models), groupContainer: .none)
