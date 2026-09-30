@@ -11,6 +11,10 @@ enum Storage {
         TaskExtras.self,
         WakeAlarm.self,
         WakeLog.self,
+        Account.self,
+        Category.self,
+        Transaction.self,
+        Transfer.self,
     ]
 
     /// `groupContainer: .none`: the default (.automatic) moves the store into

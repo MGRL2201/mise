@@ -23,6 +23,53 @@ struct Backup: Codable {
     /// Optional: older v2 files lack them.
     var wakeAlarms: [WakeAlarmRecord]?
     var wakeLogs: [WakeLogRecord]?
+    /// Optional: files before #33 lack them.
+    var accounts: [AccountRecord]?
+    var categories: [CategoryRecord]?
+    var transactions: [TransactionRecord]?
+    var transfers: [TransferRecord]?
+
+    struct AccountRecord: Codable {
+        var id: UUID
+        var name: String
+        var type: AccountType
+        var currency: String
+        var openingBalance: Decimal
+        var archived: Bool
+        var createdAt: Date
+    }
+
+    struct CategoryRecord: Codable {
+        var id: UUID
+        var name: String
+        var icon: String
+        var color: Int
+    }
+
+    struct TransactionRecord: Codable {
+        var id: UUID
+        var amount: Decimal
+        var currency: String
+        var date: Date
+        var merchant: String
+        var notes: String
+        var accountID: UUID?
+        var categoryID: UUID?
+        var categoryIsAuto: Bool
+        var attachmentID: UUID?
+        var source: TransactionSource
+        var homeAmount: Decimal?
+    }
+
+    struct TransferRecord: Codable {
+        var id: UUID
+        var fromID: UUID?
+        var toID: UUID?
+        var amount: Decimal
+        var toAmount: Decimal
+        var date: Date
+        var notes: String
+    }
 
     struct WakeAlarmRecord: Codable {
         var id: UUID
@@ -89,12 +136,30 @@ enum BackupService {
         let wakeLogs = try context.fetch(FetchDescriptor<WakeLog>()).map {
             Backup.WakeLogRecord(day: $0.day, firstRing: $0.firstRing, reRings: $0.reRings, outOfBed: $0.outOfBed)
         }
+        let accounts = try context.fetch(FetchDescriptor<Account>()).map {
+            Backup.AccountRecord(id: $0.id, name: $0.name, type: $0.type, currency: $0.currency,
+                                 openingBalance: $0.openingBalance, archived: $0.archived, createdAt: $0.createdAt)
+        }
+        let categories = try context.fetch(FetchDescriptor<Category>()).map {
+            Backup.CategoryRecord(id: $0.id, name: $0.name, icon: $0.icon, color: $0.color)
+        }
+        let transactions = try context.fetch(FetchDescriptor<Transaction>()).map {
+            Backup.TransactionRecord(id: $0.id, amount: $0.amount, currency: $0.currency, date: $0.date,
+                                     merchant: $0.merchant, notes: $0.notes, accountID: $0.account?.id,
+                                     categoryID: $0.category?.id, categoryIsAuto: $0.categoryIsAuto,
+                                     attachmentID: $0.attachmentID, source: $0.source, homeAmount: $0.homeAmount)
+        }
+        let transfers = try context.fetch(FetchDescriptor<Transfer>()).map {
+            Backup.TransferRecord(id: $0.id, fromID: $0.from?.id, toID: $0.to?.id, amount: $0.amount,
+                                  toAmount: $0.toAmount, date: $0.date, notes: $0.notes)
+        }
         var settings: [String: Any] = [:]
         for key in Backup.settingsKeys { settings[key] = defaults.object(forKey: key) }
         return try JSONEncoder().encode(Backup(
             version: Backup.currentVersion, createdAt: .now, attachments: attachments,
             settings: PropertyListSerialization.data(fromPropertyList: settings, format: .binary, options: 0),
-            tags: tags, taskExtras: taskExtras, wakeAlarms: wakeAlarms, wakeLogs: wakeLogs))
+            tags: tags, taskExtras: taskExtras, wakeAlarms: wakeAlarms, wakeLogs: wakeLogs,
+            accounts: accounts, categories: categories, transactions: transactions, transfers: transfers))
     }
 
     static func restore(_ data: Data, context: ModelContext, files: AttachmentFileStore, defaults: UserDefaults) throws {
@@ -157,6 +222,51 @@ enum BackupService {
                     log.reRings = record.reRings
                     log.outOfBed = record.outOfBed
                     context.insert(log)
+                }
+            }
+            // Files lacking finance data leave existing accounts etc. alone.
+            if let accountRecords = backup.accounts {
+                try context.fetch(FetchDescriptor<Transaction>()).forEach(context.delete)
+                try context.fetch(FetchDescriptor<Transfer>()).forEach(context.delete)
+                try context.fetch(FetchDescriptor<Category>()).forEach(context.delete)
+                try context.fetch(FetchDescriptor<Account>()).forEach(context.delete)
+                var accounts: [UUID: Account] = [:]
+                for record in accountRecords {
+                    let account = Account(name: record.name, type: record.type, currency: record.currency,
+                                          openingBalance: record.openingBalance)
+                    account.id = record.id
+                    account.archived = record.archived
+                    account.createdAt = record.createdAt
+                    context.insert(account)
+                    accounts[record.id] = account
+                }
+                var categories: [UUID: Category] = [:]
+                for record in backup.categories ?? [] {
+                    let category = Category(name: record.name, icon: record.icon, color: record.color)
+                    category.id = record.id
+                    context.insert(category)
+                    categories[record.id] = category
+                }
+                for record in backup.transactions ?? [] {
+                    let transaction = Transaction(amount: record.amount, currency: record.currency, date: record.date)
+                    transaction.id = record.id
+                    transaction.merchant = record.merchant
+                    transaction.notes = record.notes
+                    transaction.categoryIsAuto = record.categoryIsAuto
+                    transaction.attachmentID = record.attachmentID
+                    transaction.source = record.source
+                    transaction.homeAmount = record.homeAmount
+                    context.insert(transaction)
+                    transaction.account = record.accountID.flatMap { accounts[$0] }
+                    transaction.category = record.categoryID.flatMap { categories[$0] }
+                }
+                for record in backup.transfers ?? [] {
+                    let transfer = Transfer(amount: record.amount, toAmount: record.toAmount, date: record.date)
+                    transfer.id = record.id
+                    transfer.notes = record.notes
+                    context.insert(transfer)
+                    transfer.from = record.fromID.flatMap { accounts[$0] }
+                    transfer.to = record.toID.flatMap { accounts[$0] }
                 }
             }
             try context.save()

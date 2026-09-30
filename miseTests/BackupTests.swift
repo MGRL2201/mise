@@ -165,4 +165,64 @@ extension BackupTests {
         #expect(tags.map(\.name) == ["Work"])
         #expect(try target.context.fetch(FetchDescriptor<TaskExtras>()).first?.tags?.first === tags.first)
     }
+    @Test func financeRoundTripsAndReplacesStaleData() throws {
+        let source = try freshStore()
+        let account = Account(name: "Card", type: .credit, currency: "SGD", openingBalance: Decimal(string: "19.99")!)
+        account.archived = true
+        let debit = Account(name: "Debit", type: .debit, currency: "SGD")
+        let category = mise.Category(name: "Food", icon: "fork.knife", color: 0xFF8800)
+        let transaction = mise.Transaction(amount: Decimal(string: "-40.33")!, currency: "SGD", date: Date(timeIntervalSince1970: 1000))
+        transaction.merchant = "Hawker"
+        transaction.notes = "lunch"
+        transaction.categoryIsAuto = true
+        transaction.attachmentID = UUID()
+        transaction.source = .applePay
+        transaction.homeAmount = Decimal(string: "-40.33")!
+        let transfer = Transfer(amount: 40, toAmount: 40, date: Date(timeIntervalSince1970: 2000))
+        transfer.notes = "pay card"
+        [account, debit].forEach(source.context.insert)
+        source.context.insert(category)
+        source.context.insert(transaction)
+        source.context.insert(transfer)
+        transaction.account = account
+        transaction.category = category
+        transfer.from = debit
+        transfer.to = account
+        try source.context.save()
+
+        let target = try freshStore()
+        target.context.insert(Account(name: "Stale", type: .cash, currency: "USD"))
+        target.context.insert(mise.Category(name: "Stale", icon: "tag", color: 0))
+        try target.context.save()
+        try restore(try export(source), into: target)
+
+        let accounts = try target.context.fetch(FetchDescriptor<Account>())
+        #expect(Set(accounts.map(\.name)) == ["Card", "Debit"])
+        let card = try #require(accounts.first { $0.id == account.id })
+        #expect(card.type == .credit && card.currency == "SGD" && card.openingBalance == Decimal(string: "19.99"))
+        #expect(card.archived && card.createdAt == account.createdAt)
+        let categories = try target.context.fetch(FetchDescriptor<mise.Category>())
+        #expect(categories.map(\.name) == ["Food"])
+        #expect(categories.first?.id == category.id && categories.first?.icon == "fork.knife" && categories.first?.color == 0xFF8800)
+        let copy = try #require(try target.context.fetch(FetchDescriptor<mise.Transaction>()).first)
+        #expect(copy.id == transaction.id && copy.amount == Decimal(string: "-40.33") && copy.currency == "SGD" && copy.date == transaction.date)
+        #expect(copy.merchant == "Hawker" && copy.notes == "lunch" && copy.categoryIsAuto)
+        #expect(copy.attachmentID == transaction.attachmentID && copy.source == .applePay && copy.homeAmount == Decimal(string: "-40.33"))
+        #expect(copy.account === card && copy.category === categories.first)
+        let transferCopy = try #require(try target.context.fetch(FetchDescriptor<Transfer>()).first)
+        #expect(transferCopy.id == transfer.id && transferCopy.amount == 40 && transferCopy.toAmount == 40)
+        #expect(transferCopy.date == transfer.date && transferCopy.notes == "pay card")
+        #expect(transferCopy.from?.id == debit.id && transferCopy.to === card)
+        #expect(Finance.balance(of: card) == Decimal(string: "19.66"))
+    }
+
+    @Test func backupWithoutFinanceLeavesAccountsAlone() throws {
+        let target = try freshStore()
+        target.context.insert(Account(name: "Kept", type: .cash, currency: "SGD"))
+        try target.context.save()
+        let settings = try PropertyListSerialization.data(fromPropertyList: [String: Any](), format: .binary, options: 0)
+        let json = #"{"version":2,"createdAt":0,"attachments":[],"settings":"\#(settings.base64EncodedString())","tags":[],"taskExtras":[]}"#
+        try restore(Data(json.utf8), into: target)
+        #expect(try target.context.fetch(FetchDescriptor<Account>()).map(\.name) == ["Kept"])
+    }
 }
