@@ -6,6 +6,14 @@ extension Category {
 
     /// 0xRRGGBB → Color.
     static func tint(_ hex: Int) -> Color { Color(Color.Resolved(UInt32(hex))) }
+
+    var label: some View {
+        Label {
+            Text(name)
+        } icon: {
+            Image(systemName: icon).foregroundStyle(tint)
+        }
+    }
 }
 
 /// Month-by-month spend per category against its budget (#37).
@@ -54,11 +62,7 @@ struct BudgetsView: View {
                 ForEach(ordered) { category in
                     Button { editing = category } label: {
                         VStack(alignment: .leading, spacing: 6) {
-                            Label {
-                                Text(category.name)
-                            } icon: {
-                                Image(systemName: category.icon).foregroundStyle(category.tint)
-                            }
+                            category.label
                             amounts(spent.byCategory[category.id] ?? 0, budget: category.budget)
                         }
                         .contentShape(Rectangle())
@@ -71,13 +75,14 @@ struct BudgetsView: View {
                 }
             }
             .listRowBackground(Color(theme.surface))
+            Section {
+                NavigationLink("Categories") { CategoriesView() }
+            }
+            .listRowBackground(Color(theme.surface))
         }
         .navigationTitle("Budgets")
         .themedBackground()
         .toolbar {
-            ToolbarItem(placement: .secondaryAction) {
-                NavigationLink("Categories") { CategoriesView() }
-            }
             ToolbarItem(placement: .primaryAction) {
                 Button("New Category", systemImage: "plus") { isAdding = true }
             }
@@ -112,7 +117,8 @@ struct CategoriesView: View {
     @Query private var categories: [Category]
     @State private var editing: Category?
     @State private var isAdding = false
-    @State private var deleting: Category?
+    /// Name and count captured up front: the dialog must not read the model after it's deleted.
+    @State private var deleting: (category: Category, name: String, count: Int)?
     @State private var moving: Category?
 
     var body: some View {
@@ -121,13 +127,16 @@ struct CategoriesView: View {
             ForEach(ordered) { category in
                 Button { editing = category } label: {
                     HStack {
-                        label(category)
+                        category.label
                         Spacer()
                         Text("\(category.transactions?.count ?? 0)").foregroundStyle(.secondary)
                     }
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .contextMenu {
+                    Button("Delete", role: .destructive) { delete(category) }
+                }
             }
             .onMove { offsets, destination in
                 var reordered = ordered
@@ -136,12 +145,7 @@ struct CategoriesView: View {
                 try? modelContext.save()
             }
             .onDelete { offsets in
-                guard let category = offsets.first.map({ ordered[$0] }) else { return }
-                if category.transactions?.isEmpty ?? true {
-                    Budgets.delete(category, reassigningTo: nil, context: modelContext)
-                } else {
-                    deleting = category
-                }
+                if let index = offsets.first { delete(ordered[index]) }
             }
             .listRowBackground(Color(theme.surface))
         }
@@ -157,13 +161,15 @@ struct CategoriesView: View {
         }
         .confirmationDialog(Text("Delete \(deleting?.name ?? "")?"),
                             isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
-                            titleVisibility: .visible, presenting: deleting) { category in
+                            titleVisibility: .visible, presenting: deleting) { item in
             Button("Leave Uncategorized", role: .destructive) {
-                Budgets.delete(category, reassigningTo: nil, context: modelContext)
+                Budgets.delete(item.category, reassigningTo: nil, context: modelContext)
             }
-            Button("Move to…") { moving = category }
-        } message: { category in
-            Text("\(category.transactions?.count ?? 0) transactions use this category.")
+            if categories.count > 1 {
+                Button("Move to…") { moving = item.category }
+            }
+        } message: { item in
+            Text("\(item.count) transactions use this category.")
         }
         .sheet(isPresented: $isAdding) { CategoryEditor(category: nil) }
         .sheet(item: $editing) { CategoryEditor(category: $0) }
@@ -171,10 +177,10 @@ struct CategoriesView: View {
             NavigationStack {
                 List(ordered.filter { $0.id != category.id }) { target in
                     Button {
-                        Budgets.delete(category, reassigningTo: target, context: modelContext)
                         moving = nil
+                        Budgets.delete(category, reassigningTo: target, context: modelContext)
                     } label: {
-                        label(target).contentShape(Rectangle())
+                        target.label.contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .listRowBackground(Color(theme.surface))
@@ -188,11 +194,13 @@ struct CategoriesView: View {
         }
     }
 
-    private func label(_ category: Category) -> some View {
-        Label {
-            Text(category.name)
-        } icon: {
-            Image(systemName: category.icon).foregroundStyle(category.tint)
+    /// Delete outright when unused; otherwise ask where its transactions go.
+    private func delete(_ category: Category) {
+        let count = category.transactions?.count ?? 0
+        if count == 0 {
+            Budgets.delete(category, reassigningTo: nil, context: modelContext)
+        } else {
+            deleting = (category, category.name, count)
         }
     }
 }
