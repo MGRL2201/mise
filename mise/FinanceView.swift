@@ -145,7 +145,7 @@ struct AccountEditor: View {
         _name = State(initialValue: account?.name ?? "")
         _type = State(initialValue: account?.type ?? .cash)
         _currency = State(initialValue: account?.currency ?? FX.home())
-        _opening = State(initialValue: account.map { $0.openingBalance.formatted(.number.grouping(.never).precision(.fractionLength(0...18))) } ?? "")
+        _opening = State(initialValue: account.map { Accounts.plain($0.openingBalance) } ?? "")
         _archived = State(initialValue: account?.archived ?? false)
     }
 

@@ -6,6 +6,11 @@ import SwiftData
 
 /// Pure helpers for the Accounts screen (#35).
 enum Accounts {
+    /// Amount as the user would type it back into an editor.
+    static func plain(_ amount: Decimal) -> String {
+        amount.formatted(.number.grouping(.never).precision(.fractionLength(0...18)))
+    }
+
     /// nil = unparseable; empty = 0. Whole-match so "12abc" / "1.2.3" are rejected, not truncated
     /// (Decimal(string:) and Decimal(_:format:) both silently parse a prefix).
     static func parseAmount(_ text: String, locale: Locale = .current) -> Decimal? {

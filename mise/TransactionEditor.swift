@@ -1,11 +1,6 @@
 import SwiftUI
 import SwiftData
 
-/// Amount as the user would type it back (same format AccountEditor uses).
-private func plain(_ amount: Decimal) -> String {
-    amount.formatted(.number.grouping(.never).precision(.fractionLength(0...18)))
-}
-
 /// Non-archived accounts by name, plus `keeping` (current selections) even if archived.
 private func choices(_ accounts: [Account], keeping: [Account?]) -> [Account] {
     accounts.filter { account in !account.archived || keeping.contains { $0 == account } }
@@ -36,10 +31,10 @@ struct TransactionEditor: View {
         self.transaction = transaction
         let account = account ?? transaction?.account
         _income = State(initialValue: (transaction?.amount ?? 0) > 0)
-        _amount = State(initialValue: transaction.map { plain(abs($0.amount)) } ?? "")
+        _amount = State(initialValue: transaction.map { Accounts.plain(abs($0.amount)) } ?? "")
         _account = State(initialValue: account)
         _currency = State(initialValue: transaction?.currency ?? account?.currency ?? FX.home())
-        _charged = State(initialValue: transaction?.accountAmount.map { plain(abs($0)) } ?? "")
+        _charged = State(initialValue: transaction?.accountAmount.map { Accounts.plain(abs($0)) } ?? "")
         _date = State(initialValue: transaction?.date ?? .now)
         _merchant = State(initialValue: transaction?.merchant ?? "")
         _category = State(initialValue: transaction?.category)
@@ -71,6 +66,7 @@ struct TransactionEditor: View {
                         .keyboardType(.numbersAndPunctuation)
                         #endif
                     Picker("Account", selection: $account) {
+                        Text("Choose").tag(Account?.none)
                         ForEach(choices(accounts, keeping: [account]), id: \.self) { Text($0.name).tag(Optional($0)) }
                     }
                     CurrencyPicker(title: "Currency", selection: $currency)
@@ -82,6 +78,7 @@ struct TransactionEditor: View {
                     }
                     DatePicker("Date", selection: $date)
                 } footer: {
+                    if accounts.isEmpty { Text("Add an account first") }
                     if foreign { Text("Optional. Used for the account balance instead of the FX rate.") }
                 }
                 Section {
@@ -133,6 +130,7 @@ struct TransactionEditor: View {
                 if account == nil { account = choices(accounts, keeping: []).first }
             }
             .onChange(of: account) { old, new in
+                if old?.currency != new?.currency { charged = "" }
                 // Follow the account's currency unless the user picked a different one;
                 // a new transaction with no account yet takes the first account's.
                 if let new, currency == old?.currency || (old == nil && transaction == nil) { currency = new.currency }
@@ -194,8 +192,8 @@ struct TransferEditor: View {
         self.transfer = transfer
         _from = State(initialValue: transfer?.from ?? from)
         _to = State(initialValue: transfer?.to ?? to)
-        _amount = State(initialValue: transfer.map { plain($0.amount) } ?? "")
-        _received = State(initialValue: transfer.map { plain($0.toAmount) } ?? "")
+        _amount = State(initialValue: transfer.map { Accounts.plain($0.amount) } ?? "")
+        _received = State(initialValue: transfer.map { $0.from?.currency != $0.to?.currency ? Accounts.plain($0.toAmount) : "" } ?? "")
         _date = State(initialValue: transfer?.date ?? .now)
         _notes = State(initialValue: transfer?.notes ?? "")
     }
@@ -269,8 +267,10 @@ struct TransferEditor: View {
                 }
             }
             .onAppear {
-                if transfer == nil && from == nil { from = options.first }
+                if transfer == nil && from == nil { from = options.first { $0 != to } }
             }
+            .onChange(of: from?.currency) { old, new in if old != new { received = "" } }
+            .onChange(of: to?.currency) { old, new in if old != new { received = "" } }
         }
     }
 
