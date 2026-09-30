@@ -56,6 +56,34 @@ struct TransactionEntryTests {
         #expect(!TransactionEntry.matches(transaction, search: "dinner"))
     }
 
+    @Test func matchesCombinesAccountCategoryMonthAndSearch() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let march = calendar.date(from: DateComponents(year: 2026, month: 3, day: 15, hour: 12))!
+        let april = calendar.date(from: DateComponents(year: 2026, month: 4, day: 1))!
+        let main = Account(name: "Main", type: .debit, currency: "SGD")
+        let other = Account(name: "Other", type: .cash, currency: "SGD")
+        let food = mise.Category(name: "Food")
+        let travel = mise.Category(name: "Travel")
+        let transaction = mise.Transaction(amount: -5, currency: "SGD", date: march)
+        [main, other].forEach(context.insert)
+        [food, travel].forEach(context.insert)
+        context.insert(transaction)
+        transaction.merchant = "Café Nero"
+        transaction.account = main
+        transaction.category = food
+        let marchStart = calendar.dateInterval(of: .month, for: march)!.start
+        let match = { (search: String, account: Account?, category: mise.Category?, month: Date?) in
+            TransactionEntry.matches(transaction, search: search, account: account, category: category, month: month, calendar: calendar)
+        }
+        #expect(match("", nil, nil, nil))
+        #expect(!match("", other, nil, nil))
+        #expect(!match("", nil, travel, nil))
+        #expect(!match("", nil, nil, april))
+        #expect(!match("dinner", main, food, marchStart))
+        #expect(match("cafe", main, food, marchStart))
+    }
+
     @Test func monthsDistinctNewestFirst() {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "UTC")!

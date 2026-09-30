@@ -10,10 +10,10 @@ struct FinanceView: View {
     @State private var isAdding = false
     @State private var newTransaction = false
     @State private var newTransfer = false
-    @State private var showingAll = false
     @State private var askHome = false
     #if DEBUG
     @State private var debugOpened = false
+    @State private var showingAll = false
     #endif
     @AppStorage(FX.homeKey) private var home = FX.home()
     @AppStorage("finance.homeConfirmed") private var confirmed = false
@@ -46,7 +46,9 @@ struct FinanceView: View {
                 }
             }
         }
+        #if DEBUG
         .navigationDestination(isPresented: $showingAll) { AllTransactionsView() }
+        #endif
         .sheet(isPresented: $isAdding) { AccountEditor(account: nil) }
         .sheet(isPresented: $newTransaction) { TransactionEditor(transaction: nil) }
         .sheet(isPresented: $newTransfer) { TransferEditor(transfer: nil) }
@@ -260,7 +262,7 @@ struct AccountEditor: View {
 /// Account: balance, transactions by day, transfers; rows open their editors.
 struct AccountDetailView: View {
     let account: Account
-    let rates: FXRates
+    @State private var rates: FXRates
     @Environment(\.theme) private var theme
     @Environment(\.dismiss) private var dismiss
     @State private var editing = false
@@ -269,6 +271,14 @@ struct AccountDetailView: View {
     @State private var payingCard = false
     @State private var editingTransaction: Transaction?
     @State private var editingTransfer: Transfer?
+
+    init(account: Account, rates: FXRates) {
+        self.account = account
+        _rates = State(initialValue: rates)
+    }
+
+    /// Editors run FX.refresh on save; pick up any rates it fetched.
+    private func reloadRates() { rates = .load() }
 
     var body: some View {
         Group {
@@ -295,11 +305,11 @@ struct AccountDetailView: View {
         .sheet(isPresented: $editing, onDismiss: {
             if account.isDeleted || account.modelContext == nil { dismiss() }
         }) { AccountEditor(account: account) }
-        .sheet(isPresented: $newTransaction) { TransactionEditor(transaction: nil, account: account) }
-        .sheet(isPresented: $newTransfer) { TransferEditor(transfer: nil, from: account) }
-        .sheet(isPresented: $payingCard) { TransferEditor(transfer: nil, to: account) }
-        .sheet(item: $editingTransaction) { TransactionEditor(transaction: $0) }
-        .sheet(item: $editingTransfer) { TransferEditor(transfer: $0) }
+        .sheet(isPresented: $newTransaction, onDismiss: reloadRates) { TransactionEditor(transaction: nil, account: account) }
+        .sheet(isPresented: $newTransfer, onDismiss: reloadRates) { TransferEditor(transfer: nil, from: account) }
+        .sheet(isPresented: $payingCard, onDismiss: reloadRates) { TransferEditor(transfer: nil, to: account) }
+        .sheet(item: $editingTransaction, onDismiss: reloadRates) { TransactionEditor(transaction: $0) }
+        .sheet(item: $editingTransfer, onDismiss: reloadRates) { TransferEditor(transfer: $0) }
     }
 
     private var form: some View {
@@ -392,18 +402,26 @@ struct AllTransactionsView: View {
     @State private var editing: Transaction?
 
     var body: some View {
-        let shown = transactions.filter { transaction in
-            TransactionEntry.matches(transaction, search: search)
-                && (account == nil || transaction.account == account)
-                && (category == nil || transaction.category == category)
-                && (month.map { Calendar.current.isDate(transaction.date, equalTo: $0, toGranularity: .month) } ?? true)
+        let shown = transactions.filter {
+            TransactionEntry.matches($0, search: search, account: account, category: category, month: month)
         }
+        let filtered = account != nil || category != nil || month != nil
+            || !search.trimmingCharacters(in: .whitespaces).isEmpty
         Group {
             if shown.isEmpty {
-                if search.isEmpty {
-                    ContentUnavailableView("No transactions", systemImage: "list.bullet.rectangle")
+                if filtered {
+                    ContentUnavailableView {
+                        Label("No matching transactions", systemImage: "line.3.horizontal.decrease")
+                    } actions: {
+                        Button("Clear Filters") {
+                            search = ""
+                            account = nil
+                            category = nil
+                            month = nil
+                        }
+                    }
                 } else {
-                    ContentUnavailableView.search(text: search)
+                    ContentUnavailableView("No transactions", systemImage: "list.bullet.rectangle")
                 }
             } else {
                 Form {

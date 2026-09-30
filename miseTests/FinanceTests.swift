@@ -38,6 +38,25 @@ struct FinanceTests {
         #expect(Finance.balance(of: account, rates: FXRates()) == 110)
     }
 
+    @Test func deletingEntriesRestoresOpeningBalance() throws {
+        let account = Account(name: "Main", type: .debit, currency: "SGD", openingBalance: 100)
+        let other = Account(name: "Other", type: .cash, currency: "SGD")
+        context.insert(account)
+        context.insert(other)
+        let spent = transaction(-30, on: account)
+        let moved = Transfer(amount: 20, toAmount: 20, date: start)
+        context.insert(moved)
+        moved.from = account
+        moved.to = other
+        try context.save()
+        context.delete(spent)
+        context.delete(moved)
+        try context.save()
+        #expect((account.transactions ?? []).isEmpty)
+        #expect((account.outgoingTransfers ?? []).isEmpty)
+        #expect(Finance.balance(of: account, rates: FXRates()) == 100)
+    }
+
     @Test func creditCardPaymentIsNotSpentTwice() throws {
         let debit = Account(name: "Debit", type: .debit, currency: "SGD", openingBalance: 500)
         let card = Account(name: "Card", type: .credit, currency: "SGD")

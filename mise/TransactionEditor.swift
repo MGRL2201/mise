@@ -267,7 +267,11 @@ struct TransferEditor: View {
                 }
             }
             .onAppear {
-                if transfer == nil && from == nil { from = options.first { $0 != to } }
+                // Prefer paying from a bank or cash account over another card/brokerage.
+                if transfer == nil && from == nil {
+                    from = options.first { $0 != to && ($0.type == .debit || $0.type == .cash) }
+                        ?? options.first { $0 != to }
+                }
             }
             .onChange(of: from?.currency) { old, new in if old != new { received = "" } }
             .onChange(of: to?.currency) { old, new in if old != new { received = "" } }

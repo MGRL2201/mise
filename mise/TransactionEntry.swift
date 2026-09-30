@@ -35,7 +35,14 @@ enum TransactionEntry {
         return nil
     }
 
-    static func matches(_ transaction: Transaction, search: String) -> Bool {
+    /// All-transactions filter: search in merchant/notes; nil account/category/month means any.
+    static func matches(
+        _ transaction: Transaction, search: String, account: Account? = nil, category: Category? = nil,
+        month: Date? = nil, calendar: Calendar = .current
+    ) -> Bool {
+        if let account, transaction.account != account { return false }
+        if let category, transaction.category != category { return false }
+        if let month, !calendar.isDate(transaction.date, equalTo: month, toGranularity: .month) { return false }
         let search = search.trimmingCharacters(in: .whitespaces)
         if search.isEmpty { return true }
         return transaction.merchant.localizedStandardContains(search)
