@@ -32,6 +32,7 @@ struct FXTests {
     @Test func convertMissingRateReturnsNil() {
         let rates: [String: Decimal] = ["EUR": 1, "USD": Decimal(string: "1.1")!]
         #expect(FX.convert(100, from: "USD", to: "VND", rates: rates) == nil)
+        #expect(FX.convert(100, from: "USD", to: "EUR", rates: ["EUR": 0, "USD": Decimal(string: "1.1")!]) == nil)
     }
 
     // MARK: - parse
@@ -100,5 +101,17 @@ struct FXTests {
         #expect(onUncachedDay.homeAmount == nil)
         #expect(sameCurrency.homeAmount == 50)
         #expect(alreadyFilled.homeAmount == 999)
+    }
+
+    // MARK: - pending
+
+    @Test func pendingReturnsOnlyTransactionsMissingHomeAmount() throws {
+        let unfilled = transaction(100, currency: "USD", date: .now)
+        transaction(100, currency: "USD", date: .now, homeAmount: 90)
+        try context.save()
+
+        let pending = FX.pending(context)
+
+        #expect(pending.map(\.persistentModelID) == [unfilled.persistentModelID])
     }
 }

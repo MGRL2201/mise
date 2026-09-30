@@ -7,17 +7,9 @@ import SwiftData
 struct FXRates: Codable, Equatable {
     var days: [String: [String: Decimal]] = [:]
 
-    private static let formatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
-    }()
-
     static func day(_ date: Date, calendar: Calendar = .current) -> String {
-        let formatter = formatter
-        formatter.timeZone = calendar.timeZone
-        return formatter.string(from: date)
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", components.year!, components.month!, components.day!)
     }
 
     /// Exact day if cached, else the nearest earlier cached day, else nil.
@@ -75,7 +67,7 @@ enum FX {
     static func convert(_ amount: Decimal, from: String, to: String, rates: [String: Decimal]) -> Decimal? {
         if from == to { return amount }
         guard let fromRate = rates[from], fromRate != 0,
-              let toRate = rates[to]
+              let toRate = rates[to], toRate != 0
         else { return nil }
         var result = amount / fromRate * toRate
         var rounded = Decimal()
@@ -102,7 +94,9 @@ enum FX {
     private static let base = "https://api.frankfurter.dev/v1"
 
     static func fetch(_ day: String?) async throws -> (day: String, rates: [String: Decimal]) {
-        let url = URL(string: day.map { "\(base)/\($0)" } ?? "\(base)/latest")!
+        guard let url = URL(string: day.map { "\(base)/\($0)" } ?? "\(base)/latest") else {
+            throw URLError(.badURL)
+        }
         let (data, response) = try await URLSession.shared.data(from: url)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw URLError(.badServerResponse)
@@ -117,36 +111,44 @@ enum FX {
         return try JSONDecoder().decode(Response.self, from: data).date
     }
 
+    @MainActor
+    static func pending(_ context: ModelContext) -> [Transaction] {
+        let descriptor = FetchDescriptor<Transaction>(predicate: #Predicate { $0.homeAmount == nil })
+        return (try? context.fetch(descriptor)) ?? []
+    }
+
     /// Only networked entry point. Offline/errors are swallowed — the cache
-    /// simply doesn't advance and we retry next call.
+    /// simply doesn't advance and we retry next call. When offline, same-
+    /// currency transactions still get filled from the existing cache.
     @MainActor
     static func refresh(context: ModelContext, now: Date = .now) async {
         var cache = FXRates.load()
         let today = day(now)
+        let pending = pending(context)
 
         // ponytail: before ECB publishes (~16:00 CET) today's key holds
         // yesterday's rates; a later refresh the same day won't re-fetch.
+        var offline = false
         if cache.days[today] == nil {
-            guard let latest = try? await fetch(nil) else { return }
-            cache.days[latest.day] = latest.rates
-            cache.days[today] = latest.rates
+            if let latest = try? await fetch(nil) {
+                cache.days[latest.day] = latest.rates
+                cache.days[today] = latest.rates
+            } else {
+                offline = true
+            }
         }
 
-        let descriptor = FetchDescriptor<Transaction>(predicate: #Predicate { $0.homeAmount == nil })
-        guard let pending = try? context.fetch(descriptor) else {
-            cache.save()
-            return
-        }
+        if !offline {
+            let missingDays = Set(pending.map { day($0.date) })
+                .filter { cache.days[$0] == nil && $0 <= today }
+                .sorted()
 
-        let missingDays = Set(pending.map { day($0.date) })
-            .filter { cache.days[$0] == nil && $0 <= today }
-            .sorted()
-
-        // ponytail: cap fetches per run; a backlog beyond this catches up on later runs.
-        for requestedDay in missingDays.prefix(30) {
-            guard let fetched = try? await fetch(requestedDay) else { break }
-            cache.days[requestedDay] = fetched.rates
-            cache.days[fetched.day] = fetched.rates
+            // ponytail: cap fetches per run; a backlog beyond this catches up on later runs.
+            for requestedDay in missingDays.prefix(30) {
+                guard let fetched = try? await fetch(requestedDay) else { break }
+                cache.days[requestedDay] = fetched.rates
+                cache.days[fetched.day] = fetched.rates
+            }
         }
 
         cache.save()
