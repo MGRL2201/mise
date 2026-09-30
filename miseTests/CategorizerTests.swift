@@ -43,16 +43,20 @@ struct CategorizerTests {
 
     @Test func applyToAllMatchesNormalizedMerchant() throws {
         context.insert(food)
-        let transactions = ["Grab #1", "GRAB", "FairPrice"].map { merchant in
+        let transactions = ["Grab #1", "GRAB", "FairPrice", "", "Grab SG"].map { merchant in
             let transaction = mise.Transaction(amount: -10, currency: "SGD", date: .now)
             transaction.merchant = merchant
             transaction.categoryIsAuto = true
             context.insert(transaction)
             return transaction
         }
+        transactions[4].category = food
+        #expect(Categorizer.applyToAll(merchant: "  ", category: coffee, context: context) == 0)
+        #expect(transactions[3].category == nil && transactions[3].categoryIsAuto)
         #expect(Categorizer.applyToAll(merchant: "grab", category: food, context: context) == 2)
         #expect(transactions[0].category === food && !transactions[0].categoryIsAuto)
         #expect(transactions[1].category === food && !transactions[1].categoryIsAuto)
         #expect(transactions[2].category == nil && transactions[2].categoryIsAuto)
+        #expect(transactions[4].category === food && !transactions[4].categoryIsAuto)  // already food: flag cleared, not counted
     }
 }
