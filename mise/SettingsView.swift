@@ -84,11 +84,7 @@ struct SettingsView: View {
             .listRowBackground(Color(theme.surface))
 
             Section("Finance") {
-                Picker("Home currency", selection: $homeCurrency) {
-                    ForEach(Locale.commonISOCurrencyCodes, id: \.self) { code in
-                        Text("\(code) – \(Locale.current.localizedString(forCurrencyCode: code) ?? code)").tag(code)
-                    }
-                }
+                CurrencyPicker(title: "Home currency", selection: $homeCurrency)
                 .onChange(of: homeCurrency) { Task { await FX.rebase(context: modelContext) } }
                 SecureField("Stock price API key", text: $stockAPIKeyInput)
                 Text(stockAPIKeySaved ? "A key is stored." : "No key stored.")
