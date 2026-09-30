@@ -57,6 +57,40 @@ struct BudgetsTests {
         #expect(result.unconverted.isEmpty)
     }
 
+    @Test func claimAlertsOncePerThresholdInCurrentMonth() throws {
+        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        defaults.set("SGD", forKey: FX.homeKey)
+        let now = Date.now
+        let food = mise.Category(name: "Food")
+        food.budget = 100
+        context.insert(food)
+        func spend(_ amount: Decimal, at date: Date = now) {
+            transaction(-amount, food, at: date).homeAmount = -amount
+        }
+        let claim = { (date: Date) in Budgets.claimAlerts(for: food, on: date, context: self.context, now: now, defaults: defaults) }
+        let month = String(format: "%04d-%02d", Calendar.current.component(.year, from: now), Calendar.current.component(.month, from: now))
+        let prefix = "budget|\(food.id.uuidString)|\(month)|"
+
+        spend(85)
+        #expect(claim(now) == [prefix + "80"])
+        #expect(claim(now) == [])
+        spend(20)
+        #expect(claim(now) == [prefix + "100"])
+
+        let lastMonth = try #require(Calendar.current.date(byAdding: .month, value: -1, to: now))
+        spend(500, at: lastMonth)
+        #expect(claim(lastMonth) == [])
+    }
+
+    @Test func claimAlertsNeedsBudget() throws {
+        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let food = mise.Category(name: "Food")
+        context.insert(food)
+        transaction(-500, food, at: .now).homeAmount = -500
+        #expect(Budgets.claimAlerts(for: food, on: .now, context: context, defaults: defaults) == [])
+        #expect(Budgets.claimAlerts(for: nil, on: .now, context: context, defaults: defaults) == [])
+    }
+
     @Test func starterCategoriesCreatedOnce() throws {
         let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
         Budgets.addStarterCategories(context: context, defaults: defaults)
@@ -87,6 +121,7 @@ struct BudgetsTests {
         let categories = [b, a2, a1, first]
         #expect(Budgets.ordered(categories).map(\.name) == ["z", "a9", "a10", "b"])
         #expect(Budgets.named("  A9 ", in: categories) === a1)
+        #expect(Budgets.named("a9\n", in: categories) === a1)
         #expect(Budgets.named("a", in: categories) == nil)
     }
 }

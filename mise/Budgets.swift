@@ -32,7 +32,7 @@ enum Budgets {
                 category.sortOrder = index
                 context.insert(category)
             }
-            try? context.save()
+            guard (try? context.save()) != nil else { return }
         }
         defaults.set(true, forKey: starterKey)
     }
@@ -47,8 +47,8 @@ enum Budgets {
 
     /// Trimmed, case-insensitive exact name match.
     static func named(_ name: String, in categories: [Category]) -> Category? {
-        let name = name.trimmingCharacters(in: .whitespaces)
-        return categories.first { $0.name.trimmingCharacters(in: .whitespaces).caseInsensitiveCompare(name) == .orderedSame }
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return categories.first { $0.name.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare(name) == .orderedSame }
     }
 
     /// Home-currency outflows in `month` per category id (via `Finance.homeSpend`).
@@ -83,24 +83,37 @@ enum Budgets {
             .filter { !sent.contains($0) }
     }
 
-    /// Call after saving a transaction dated `date` in `category`; posts any newly reached alert.
+    /// Newly reached alert ids for `category` this month, marked sent in `defaults`.
     @MainActor
-    static func checkAlerts(for category: Category?, on date: Date, context: ModelContext,
-                            now: Date = .now, defaults: UserDefaults = .standard) async {
+    static func claimAlerts(for category: Category?, on date: Date, context: ModelContext,
+                            now: Date = .now, defaults: UserDefaults = .standard) -> [String] {
         let calendar = Calendar.current
         guard !Storage.inMemory, let category, let budget = category.budget,
               calendar.isDate(date, equalTo: now, toGranularity: .month),
               let month = calendar.dateInterval(of: .month, for: now)
+        else { return [] }
+        let transactions = (try? context.fetch(FetchDescriptor<Transaction>())) ?? []
+        // ponytail: unconverted foreign spend is ignored here until rates arrive.
+        let spent = Budgets.spent(transactions, in: month, rates: .load(), home: FX.home(defaults)).byCategory[category.id] ?? 0
+        let sent = defaults.stringArray(forKey: sentKey) ?? []
+        let ids = alertIDs(categoryID: category.id, month: now, spent: spent, budget: budget, sent: Set(sent))
+        // Marked sent before the permission check on purpose: granting permission later must not flood old alerts.
+        if !ids.isEmpty { defaults.set(sent + ids, forKey: sentKey) }
+        return ids
+    }
+
+    /// Call after saving a transaction dated `date` in `category`; posts any newly reached alert.
+    @MainActor
+    static func checkAlerts(for category: Category?, on date: Date, context: ModelContext,
+                            now: Date = .now, defaults: UserDefaults = .standard) async {
+        guard let category, let budget = category.budget,
+              let last = claimAlerts(for: category, on: date, context: context, now: now, defaults: defaults).last,
+              await LocalNotifications.authorized(prompt: false),
+              let month = Calendar.current.dateInterval(of: .month, for: now)
         else { return }
         let home = FX.home(defaults)
         let transactions = (try? context.fetch(FetchDescriptor<Transaction>())) ?? []
-        // ponytail: unconverted foreign spend is ignored here until rates arrive.
         let spent = Budgets.spent(transactions, in: month, rates: .load(), home: home).byCategory[category.id] ?? 0
-        let sent = defaults.stringArray(forKey: sentKey) ?? []
-        let ids = alertIDs(categoryID: category.id, month: now, spent: spent, budget: budget, sent: Set(sent))
-        guard let last = ids.last else { return }
-        defaults.set(sent + ids, forKey: sentKey)
-        guard await LocalNotifications.authorized(prompt: false) else { return }
         // Both thresholds at once: only the 100% one is shown.
         await post(id: last, name: category.name, spent: spent, budget: budget, home: home)
     }
