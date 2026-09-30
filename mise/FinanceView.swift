@@ -1,6 +1,5 @@
 import SwiftUI
 import SwiftData
-import RegexBuilder
 
 /// Money tab home: net worth, accounts by type, archived accounts (#35).
 struct FinanceView: View {
@@ -146,7 +145,7 @@ struct AccountEditor: View {
         _name = State(initialValue: account?.name ?? "")
         _type = State(initialValue: account?.type ?? .cash)
         _currency = State(initialValue: account?.currency ?? FX.home())
-        _opening = State(initialValue: account.map { $0.openingBalance.formatted(.number.grouping(.never)) } ?? "")
+        _opening = State(initialValue: account.map { $0.openingBalance.formatted(.number.grouping(.never).precision(.fractionLength(0...18))) } ?? "")
         _archived = State(initialValue: account?.archived ?? false)
     }
 
@@ -156,13 +155,7 @@ struct AccountEditor: View {
         return account
     }
 
-    /// nil = unparseable; empty = 0. Whole-match so "12abc" / "1.2.3" are rejected, not truncated
-    /// (Decimal(string:) and Decimal(_:format:) both silently parse a prefix).
-    private var openingValue: Decimal? {
-        let text = opening.trimmingCharacters(in: .whitespaces)
-        if text.isEmpty { return 0 }
-        return try? Regex { Capture(Decimal.FormatStyle(locale: .current)) }.wholeMatch(in: text)?.1
-    }
+    private var openingValue: Decimal? { Accounts.parseAmount(opening) }
 
     private var canDelete: Bool {
         guard let account = live else { return false }

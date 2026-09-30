@@ -1,7 +1,19 @@
 import Foundation
+import RegexBuilder
+#if DEBUG
+import SwiftData
+#endif
 
 /// Pure helpers for the Accounts screen (#35).
 enum Accounts {
+    /// nil = unparseable; empty = 0. Whole-match so "12abc" / "1.2.3" are rejected, not truncated
+    /// (Decimal(string:) and Decimal(_:format:) both silently parse a prefix).
+    static func parseAmount(_ text: String, locale: Locale = .current) -> Decimal? {
+        let text = text.trimmingCharacters(in: .whitespaces)
+        if text.isEmpty { return 0 }
+        return try? Regex { Capture(Decimal.FormatStyle(locale: locale)) }.wholeMatch(in: text)?.1
+    }
+
     /// Non-archived accounts by type (AccountType.allCases order), name-sorted; empty types omitted.
     static func grouped(_ accounts: [Account]) -> [(type: AccountType, accounts: [Account])] {
         let active = accounts.filter { !$0.archived }
@@ -37,3 +49,45 @@ enum Accounts {
             .sorted { $0.day > $1.day }
     }
 }
+
+#if DEBUG
+extension Accounts {
+    /// Screenshot data for `-miseSeedFinance YES`; only ever inserted into an in-memory container.
+    static func seed(_ context: ModelContext) {
+        func account(_ name: String, _ type: AccountType, _ currency: String, _ opening: Decimal) -> Account {
+            let account = Account(name: name, type: type, currency: currency, openingBalance: opening)
+            context.insert(account)
+            return account
+        }
+        _ = account("Wallet", .cash, "SGD", 120)
+        let dbs = account("DBS Multiplier", .debit, "SGD", Decimal(string: "4250.30")!)
+        _ = account("Wise USD", .debit, "USD", 800)
+        _ = account("Citi Rewards", .credit, "SGD", Decimal(string: "-640.50")!)
+        _ = account("IBKR", .brokerage, "USD", 12_000)
+        account("Old POSB", .debit, "SGD", 0).archived = true
+
+        let groceries = Category(name: "Groceries", icon: "cart", color: 1)
+        let transport = Category(name: "Transport", icon: "car", color: 2)
+        let income = Category(name: "Income", icon: "banknote", color: 3)
+        let day: TimeInterval = 86_400
+        let rows: [(String, String, Category, TimeInterval)] = [
+            ("Salary", "5200", income, 2 * day + 3_600),
+            ("FairPrice", "-84.35", groceries, 2 * day),
+            ("Grab", "-18.60", transport, day + 7_200),
+            ("FairPrice", "-12.90", groceries, day + 3_600),
+            ("Grab", "-9.40", transport, day),
+            ("Cold Storage", "-46.20", groceries, 10_800),
+            ("Grab", "-22.10", transport, 3_600),
+            ("FairPrice", "-6.75", groceries, 600),
+        ]
+        for (merchant, amount, category, ago) in rows {
+            let transaction = Transaction(amount: Decimal(string: amount)!, currency: "SGD", date: .now - ago)
+            transaction.merchant = merchant
+            transaction.account = dbs
+            transaction.category = category
+            context.insert(transaction)
+        }
+        try? context.save()
+    }
+}
+#endif

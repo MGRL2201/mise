@@ -48,4 +48,26 @@ struct AccountsTests {
         #expect(days[1].transactions.map(\.id) == [late.id, early.id])
         #expect(days[0].transactions.map(\.id) == [nextDay.id])
     }
+
+    @Test func parseAmountStrictWholeMatch() {
+        let us = Locale(identifier: "en_US"), de = Locale(identifier: "de_DE")
+        #expect(Accounts.parseAmount("1,234.5", locale: us) == Decimal(string: "1234.5"))
+        #expect(Accounts.parseAmount("-500", locale: us) == -500)
+        #expect(Accounts.parseAmount("12abc", locale: us) == nil)
+        #expect(Accounts.parseAmount("1.2.3", locale: us) == nil)
+        #expect(Accounts.parseAmount("0.07", locale: us) == Decimal(string: "0.07"))
+        #expect(Accounts.parseAmount("  ", locale: us) == 0)
+        #expect(Accounts.parseAmount("", locale: us) == 0)
+        #expect(Accounts.parseAmount("1.234,5", locale: de) == Decimal(string: "1234.5"))
+    }
+
+    /// AccountEditor prefill must round-trip through parseAmount without losing fraction digits.
+    @Test func prefillFormatRoundTrips() {
+        for locale in [Locale(identifier: "en_US"), Locale(identifier: "de_DE")] {
+            for value in [Decimal(string: "0.123456789")!, Decimal(string: "-640.5")!, 12_000] {
+                let text = value.formatted(.number.grouping(.never).precision(.fractionLength(0...18)).locale(locale))
+                #expect(Accounts.parseAmount(text, locale: locale) == value, "\(text)")
+            }
+        }
+    }
 }

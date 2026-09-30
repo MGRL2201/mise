@@ -17,7 +17,11 @@ struct MiseApp: App {
     @Environment(\.scenePhase) private var phase
 
     init() {
+        #if DEBUG
+        let container = Storage.inMemory ? Self.seededContainer() : Storage.makeContainer()
+        #else
         let container = Storage.makeContainer()
+        #endif
         self.container = container
         AppDependencyManager.shared.add(dependency: container)  // CompleteTaskIntent, alarm intents
         let store = EKEventStore()  // one store per app (Apple guidance)
@@ -71,6 +75,15 @@ struct MiseApp: App {
         }
         #endif
     }
+
+    /// DEBUG `-miseSeedFinance YES`: in-memory sample data for screenshots; never touches the real store or backups.
+    #if DEBUG
+    private static func seededContainer() -> ModelContainer {
+        let container = try! ModelContainer(for: Schema(Storage.models), configurations: ModelConfiguration(schema: Schema(Storage.models), isStoredInMemoryOnly: true))
+        Accounts.seed(container.mainContext)
+        return container
+    }
+    #endif
 
     #if os(iOS)
     // ponytail: spike write for #10/#11; replace with real widget snapshot later
