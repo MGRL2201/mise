@@ -178,6 +178,7 @@ extension BackupTests {
         transaction.attachmentID = UUID()
         transaction.source = .applePay
         transaction.homeAmount = Decimal(string: "-40.33")!
+        transaction.accountAmount = Decimal(string: "-41.20")!
         let transfer = Transfer(amount: 40, toAmount: 40, date: Date(timeIntervalSince1970: 2000))
         transfer.notes = "pay card"
         [account, debit].forEach(source.context.insert)
@@ -208,6 +209,7 @@ extension BackupTests {
         #expect(copy.id == transaction.id && copy.amount == Decimal(string: "-40.33") && copy.currency == "SGD" && copy.date == transaction.date)
         #expect(copy.merchant == "Hawker" && copy.notes == "lunch" && copy.categoryIsAuto)
         #expect(copy.attachmentID == transaction.attachmentID && copy.source == .applePay && copy.homeAmount == Decimal(string: "-40.33"))
+        #expect(copy.accountAmount == Decimal(string: "-41.20"))
         #expect(copy.account === card && copy.category === categories.first)
         let transferCopy = try #require(try target.context.fetch(FetchDescriptor<Transfer>()).first)
         #expect(transferCopy.id == transfer.id && transferCopy.amount == 40 && transferCopy.toAmount == 40)
