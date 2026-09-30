@@ -86,12 +86,21 @@ struct ContentView: View {
     @Environment(AppLock.self) private var lock
     private let planning = PlanningPrompt.shared
 
+    /// macOS holds sheets back while the whole app is locked (an attached sheet
+    /// blocks the main window's lock overlay). iOS covers sheets with the lock window.
+    private var holdSheets: Bool {
+        #if os(macOS)
+        lock.mode == .wholeApp && !lock.isUnlocked
+        #else
+        false
+        #endif
+    }
+
     var body: some View {
         root
-            // Held back while the whole app is locked: a sheet would sit above the lock overlay.
-            .sheet(isPresented: Binding { planning.isPresented && !(lock.mode == .wholeApp && !lock.isUnlocked) }
+            .sheet(isPresented: Binding { planning.isPresented && !holdSheets }
                    set: { planning.isPresented = $0 }) { PlanningView() }
-            .sheet(isPresented: Binding { planning.isWeeklyReviewPresented && !(lock.mode == .wholeApp && !lock.isUnlocked) }
+            .sheet(isPresented: Binding { planning.isWeeklyReviewPresented && !holdSheets }
                    set: { planning.isWeeklyReviewPresented = $0 }) { WeeklyReviewView() }
             #if DEBUG
             .onAppear {
