@@ -39,6 +39,7 @@ struct MiseApp: App {
                     switch phase {
                     case .active:
                         AutoBackup.run(context: container.mainContext)
+                        Task { await FX.refresh(context: container.mainContext) }
                         Task { await TravelTime.refresh(store: calendar, prompt: true) }
                         Task { await DailyPlanning.sync(prompt: false) }
                         Task { await WeeklyReview.sync(prompt: false) }

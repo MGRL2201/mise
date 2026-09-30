@@ -34,6 +34,7 @@ struct SettingsView: View {
     @AppStorage(WeeklyReview.enabledKey) private var weeklyReview = false
     @AppStorage(WeeklyReview.dayKey) private var weeklyReviewDay = WeeklyReview.defaultDay
     @AppStorage(WeeklyReview.timeKey) private var weeklyReviewTime = WeeklyReview.defaultTime
+    @AppStorage(FX.homeKey) private var homeCurrency = FX.home()
 
     /// Minutes after midnight as a time of day today.
     private func time(_ minutes: Binding<Int>) -> Binding<Date> {
@@ -83,6 +84,12 @@ struct SettingsView: View {
             .listRowBackground(Color(theme.surface))
 
             Section("Finance") {
+                Picker("Home currency", selection: $homeCurrency) {
+                    ForEach(Locale.commonISOCurrencyCodes, id: \.self) { code in
+                        Text("\(code) – \(Locale.current.localizedString(forCurrencyCode: code) ?? code)").tag(code)
+                    }
+                }
+                .onChange(of: homeCurrency) { Task { await FX.rebase(context: modelContext) } }
                 SecureField("Stock price API key", text: $stockAPIKeyInput)
                 Text(stockAPIKeySaved ? "A key is stored." : "No key stored.")
                     .foregroundStyle(.secondary)
