@@ -8,7 +8,13 @@ struct FinanceView: View {
     @Query private var accounts: [Account]
     @State private var rates = FXRates()
     @State private var isAdding = false
+    @State private var newTransaction = false
+    @State private var newTransfer = false
+    @State private var showingAll = false
     @State private var askHome = false
+    #if DEBUG
+    @State private var debugOpened = false
+    #endif
     @AppStorage(FX.homeKey) private var home = FX.home()
     @AppStorage("finance.homeConfirmed") private var confirmed = false
 
@@ -30,13 +36,35 @@ struct FinanceView: View {
         .themedBackground()
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button("Add Account", systemImage: "plus") { isAdding = true }
+                Menu("Add", systemImage: "plus") {
+                    Group {
+                        Button("New Transaction", systemImage: "list.bullet.rectangle") { newTransaction = true }
+                        Button("New Transfer", systemImage: "arrow.left.arrow.right") { newTransfer = true }
+                    }
+                    .disabled(!accounts.contains { !$0.archived })
+                    Button("New Account", systemImage: "banknote") { isAdding = true }
+                }
             }
         }
+        .navigationDestination(isPresented: $showingAll) { AllTransactionsView() }
         .sheet(isPresented: $isAdding) { AccountEditor(account: nil) }
+        .sheet(isPresented: $newTransaction) { TransactionEditor(transaction: nil) }
+        .sheet(isPresented: $newTransfer) { TransferEditor(transfer: nil) }
         .sheet(isPresented: $askHome, onDismiss: { confirmed = true }) { HomeCurrencySheet() }
         .onAppear {
             if accounts.isEmpty && !confirmed { askHome = true }
+            #if DEBUG
+            // Screenshot hook: `-miseMoney transaction|transfer|all`, once per launch.
+            if !debugOpened {
+                debugOpened = true
+                switch UserDefaults.standard.string(forKey: "miseMoney") {
+                case "transaction": newTransaction = true
+                case "transfer": newTransfer = true
+                case "all": showingAll = true
+                default: break
+                }
+            }
+            #endif
         }
         .task {
             rates = .load()
@@ -58,6 +86,10 @@ struct FinanceView: View {
                 ForEach(worth.unconverted.filter { $0.value != 0 }.sorted { $0.key < $1.key }, id: \.key) { code, amount in
                     Text("\(amount.formatted(.currency(code: code))) (no rate)").foregroundStyle(.secondary)
                 }
+            }
+            .listRowBackground(Color(theme.surface))
+            Section {
+                NavigationLink("All Transactions") { AllTransactionsView() }
             }
             .listRowBackground(Color(theme.surface))
             ForEach(Accounts.grouped(accounts), id: \.type) { group in
@@ -225,13 +257,18 @@ struct AccountEditor: View {
     }
 }
 
-/// Read-only account: balance and transactions by day.
+/// Account: balance, transactions by day, transfers; rows open their editors.
 struct AccountDetailView: View {
     let account: Account
     let rates: FXRates
     @Environment(\.theme) private var theme
     @Environment(\.dismiss) private var dismiss
     @State private var editing = false
+    @State private var newTransaction = false
+    @State private var newTransfer = false
+    @State private var payingCard = false
+    @State private var editingTransaction: Transaction?
+    @State private var editingTransfer: Transfer?
 
     var body: some View {
         Group {
@@ -244,15 +281,30 @@ struct AccountDetailView: View {
         }
         .themedBackground()
         .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Menu("Add", systemImage: "plus") {
+                    Button("New Transaction", systemImage: "list.bullet.rectangle") { newTransaction = true }
+                    Button("New Transfer", systemImage: "arrow.left.arrow.right") { newTransfer = true }
+                    if account.type == .credit {
+                        Button("Pay Card", systemImage: "creditcard") { payingCard = true }
+                    }
+                }
+            }
             ToolbarItem(placement: .primaryAction) { Button("Edit") { editing = true } }
         }
         .sheet(isPresented: $editing, onDismiss: {
             if account.isDeleted || account.modelContext == nil { dismiss() }
         }) { AccountEditor(account: account) }
+        .sheet(isPresented: $newTransaction) { TransactionEditor(transaction: nil, account: account) }
+        .sheet(isPresented: $newTransfer) { TransferEditor(transfer: nil, from: account) }
+        .sheet(isPresented: $payingCard) { TransferEditor(transfer: nil, to: account) }
+        .sheet(item: $editingTransaction) { TransactionEditor(transaction: $0) }
+        .sheet(item: $editingTransfer) { TransferEditor(transfer: $0) }
     }
 
     private var form: some View {
         let days = Accounts.days(account.transactions ?? [])
+        let transfers = ((account.outgoingTransfers ?? []) + (account.incomingTransfers ?? [])).sorted { $0.date > $1.date }
         return Form {
             Section {
                 LabeledContent("Balance") {
@@ -266,23 +318,132 @@ struct AccountDetailView: View {
             }
             ForEach(days, id: \.day) { day in
                 Section(day.day.formatted(date: .abbreviated, time: .omitted)) {
-                    ForEach(day.transactions) { transaction in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(transaction.merchant.isEmpty ? "Transaction" : transaction.merchant)
-                                if let category = transaction.category {
-                                    Text(category.name).font(.subheadline).foregroundStyle(.secondary)
-                                }
-                            }
-                            Spacer()
-                            Text(transaction.amount, format: .currency(code: transaction.currency))
-                                .foregroundStyle(transaction.amount > 0 ? .green : .primary)
-                        }
-                    }
+                    ForEach(day.transactions) { TransactionRow(transaction: $0, editing: $editingTransaction) }
+                }
+                .listRowBackground(Color(theme.surface))
+            }
+            if !transfers.isEmpty {
+                Section("Transfers") {
+                    ForEach(transfers, content: transferRow)
                 }
                 .listRowBackground(Color(theme.surface))
             }
         }
         .navigationTitle(account.name)
+    }
+
+    private func transferRow(_ transfer: Transfer) -> some View {
+        let outgoing = transfer.from == account
+        return Button { editingTransfer = transfer } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(outgoing ? "To \(transfer.to?.name ?? "Unknown")" : "From \(transfer.from?.name ?? "Unknown")")
+                    Text(transfer.date, format: .dateTime.day().month().year()).font(.subheadline).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(outgoing ? -transfer.amount : transfer.toAmount, format: .currency(code: account.currency))
+                    .foregroundStyle(outgoing ? Color.primary : .green)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Merchant, category and amount; the charge in the account's currency when it differs. Tap to edit.
+struct TransactionRow: View {
+    let transaction: Transaction
+    @Binding var editing: Transaction?
+
+    var body: some View {
+        Button { editing = transaction } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(transaction.merchant.isEmpty ? "Transaction" : transaction.merchant)
+                    if let category = transaction.category {
+                        Text(category.name).font(.subheadline).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(transaction.amount, format: .currency(code: transaction.currency))
+                        .foregroundStyle(transaction.amount > 0 ? .green : .primary)
+                    if let charged = transaction.accountAmount, let currency = transaction.account?.currency {
+                        Text(charged, format: .currency(code: currency)).font(.subheadline).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Every transaction by day, with search and account/category/month filters (#36).
+struct AllTransactionsView: View {
+    @Environment(\.theme) private var theme
+    @Query(sort: \Transaction.date, order: .reverse) private var transactions: [Transaction]
+    @Query private var accounts: [Account]
+    @Query private var categories: [Category]
+    @State private var search = ""
+    @State private var account: Account?
+    @State private var category: Category?
+    @State private var month: Date?
+    @State private var editing: Transaction?
+
+    var body: some View {
+        let shown = transactions.filter { transaction in
+            TransactionEntry.matches(transaction, search: search)
+                && (account == nil || transaction.account == account)
+                && (category == nil || transaction.category == category)
+                && (month.map { Calendar.current.isDate(transaction.date, equalTo: $0, toGranularity: .month) } ?? true)
+        }
+        Group {
+            if shown.isEmpty {
+                if search.isEmpty {
+                    ContentUnavailableView("No transactions", systemImage: "list.bullet.rectangle")
+                } else {
+                    ContentUnavailableView.search(text: search)
+                }
+            } else {
+                Form {
+                    ForEach(Accounts.days(shown), id: \.day) { day in
+                        Section(day.day.formatted(date: .abbreviated, time: .omitted)) {
+                            ForEach(day.transactions) { TransactionRow(transaction: $0, editing: $editing) }
+                        }
+                        .listRowBackground(Color(theme.surface))
+                    }
+                }
+            }
+        }
+        .navigationTitle("All Transactions")
+        .themedBackground()
+        .searchable(text: $search)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Menu("Filter", systemImage: "line.3.horizontal.decrease") {
+                    Picker("Account", selection: $account) {
+                        Text("All").tag(Account?.none)
+                        ForEach(accounts.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }, id: \.self) {
+                            Text($0.name).tag(Optional($0))
+                        }
+                    }
+                    Picker("Category", selection: $category) {
+                        Text("All").tag(Category?.none)
+                        ForEach(categories.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }, id: \.self) {
+                            Text($0.name).tag(Optional($0))
+                        }
+                    }
+                    Picker("Month", selection: $month) {
+                        Text("All").tag(Date?.none)
+                        ForEach(TransactionEntry.months(transactions), id: \.self) {
+                            Text($0, format: .dateTime.month(.wide).year()).tag(Optional($0))
+                        }
+                    }
+                }
+                .pickerStyle(.menu)
+            }
+        }
+        .sheet(item: $editing) { TransactionEditor(transaction: $0) }
     }
 }

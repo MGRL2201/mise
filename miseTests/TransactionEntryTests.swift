@@ -55,4 +55,17 @@ struct TransactionEntryTests {
         #expect(TransactionEntry.matches(transaction, search: "LUNCH"))
         #expect(!TransactionEntry.matches(transaction, search: "dinner"))
     }
+
+    @Test func monthsDistinctNewestFirst() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let date = { (m: Int, d: Int) in calendar.date(from: DateComponents(year: 2026, month: m, day: d, hour: 12))! }
+        let transactions = [date(3, 5), date(5, 1), date(3, 30), date(4, 15)].map {
+            mise.Transaction(amount: -1, currency: "SGD", date: $0)
+        }
+        transactions.forEach(context.insert)
+        #expect(TransactionEntry.months(transactions, calendar: calendar) == [5, 4, 3].map {
+            calendar.date(from: DateComponents(year: 2026, month: $0, day: 1))!
+        })
+    }
 }

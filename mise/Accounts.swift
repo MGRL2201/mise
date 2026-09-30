@@ -66,14 +66,15 @@ extension Accounts {
         }
         _ = account("Wallet", .cash, "SGD", 120)
         let dbs = account("DBS Multiplier", .debit, "SGD", Decimal(string: "4250.30")!)
-        _ = account("Wise USD", .debit, "USD", 800)
-        _ = account("Citi Rewards", .credit, "SGD", Decimal(string: "-640.50")!)
+        let wise = account("Wise USD", .debit, "USD", 800)
+        let citi = account("Citi Rewards", .credit, "SGD", Decimal(string: "-640.50")!)
         _ = account("IBKR", .brokerage, "USD", 12_000)
         account("Old POSB", .debit, "SGD", 0).archived = true
 
         let groceries = Category(name: "Groceries", icon: "cart", color: 1)
         let transport = Category(name: "Transport", icon: "car", color: 2)
         let income = Category(name: "Income", icon: "banknote", color: 3)
+        let dining = Category(name: "Dining", icon: "fork.knife", color: 4)
         let day: TimeInterval = 86_400
         let rows: [(String, String, Category, TimeInterval)] = [
             ("Salary", "5200", income, 2 * day + 3_600),
@@ -91,6 +92,22 @@ extension Accounts {
             transaction.account = dbs
             transaction.category = category
             context.insert(transaction)
+        }
+        let coffee = Transaction(amount: Decimal(string: "-6.50")!, currency: "USD", date: .now - 3 * day)
+        coffee.merchant = "Blue Bottle"
+        coffee.notes = "SF trip"
+        coffee.accountAmount = Decimal(string: "-8.80")!
+        coffee.account = citi
+        coffee.category = dining
+        context.insert(coffee)
+        for (from, to, amount, toAmount, ago) in [
+            (dbs, wise, Decimal(1350), Decimal(1000), 4 * day),
+            (dbs, citi, Decimal(string: "640.50")!, Decimal(string: "640.50")!, 5 * day),
+        ] {
+            let transfer = Transfer(amount: amount, toAmount: toAmount, date: .now - ago)
+            transfer.from = from
+            transfer.to = to
+            context.insert(transfer)
         }
         try? context.save()
     }

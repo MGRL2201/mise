@@ -78,7 +78,7 @@ struct TransactionEditor: View {
                     }
                     DatePicker("Date", selection: $date)
                 } footer: {
-                    if accounts.isEmpty { Text("Add an account first") }
+                    if choices(accounts, keeping: [account]).isEmpty { Text("Add an account first") }
                     if foreign { Text("Optional. Used for the account balance instead of the FX rate.") }
                 }
                 Section {
@@ -127,7 +127,7 @@ struct TransactionEditor: View {
                 }
             }
             .onAppear {
-                if account == nil { account = choices(accounts, keeping: []).first }
+                if account == nil && transaction == nil { account = choices(accounts, keeping: []).first }
             }
             .onChange(of: account) { old, new in
                 if old?.currency != new?.currency { charged = "" }

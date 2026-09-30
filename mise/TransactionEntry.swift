@@ -41,4 +41,9 @@ enum TransactionEntry {
         return transaction.merchant.localizedStandardContains(search)
             || transaction.notes.localizedStandardContains(search)
     }
+
+    /// Start of each month that has a transaction, newest first.
+    static func months(_ transactions: [Transaction], calendar: Calendar = .current) -> [Date] {
+        Set(transactions.compactMap { calendar.dateInterval(of: .month, for: $0.date)?.start }).sorted(by: >)
+    }
 }
