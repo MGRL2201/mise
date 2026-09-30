@@ -3,7 +3,7 @@ import SwiftUI
 /// Every screen the app can navigate to. Shared by the iOS tab/More list, the
 /// Mac sidebar, and deep links (`mise://<destination>` or `.../new`).
 enum Destination: String, CaseIterable, Identifiable {
-    case today, tasks, calendar, money, notes, news, settings
+    case today, tasks, calendar, money, notes, news, wakeUp = "wakeup", settings
 
     var id: String { rawValue }
 
@@ -15,6 +15,7 @@ enum Destination: String, CaseIterable, Identifiable {
         case .money: "Money"
         case .notes: "Notes"
         case .news: "News"
+        case .wakeUp: "Wake-up"
         case .settings: "Settings"
         }
     }
@@ -27,6 +28,7 @@ enum Destination: String, CaseIterable, Identifiable {
         case .money: "dollarsign.circle"
         case .notes: "note.text"
         case .news: "newspaper"
+        case .wakeUp: "alarm"
         case .settings: "gear"
         }
     }
@@ -73,12 +75,12 @@ struct PlaceholderView: View {
 struct ContentView: View {
     static let title = "mise"
 
-    // The four fixed iOS tabs plus "more", which pushes notes/news/settings.
+    // The four fixed iOS tabs plus "more", which pushes notes/news/wake-up/settings.
     private enum MainTab: Hashable {
         case today, tasks, calendar, money, more
     }
 
-    private static let moreDestinations: [Destination] = [.notes, .news, .settings]
+    private static let moreDestinations: [Destination] = [.notes, .news, .wakeUp, .settings]
 
     @State private var tab: MainTab = .today
     @State private var morePath: [Destination] = []
@@ -187,6 +189,8 @@ struct ContentView: View {
                 TasksView()
             } else if destination == .calendar {
                 CalendarView()
+            } else if destination == .wakeUp {
+                WakeUpView()
             } else if destination == .money && lock.mode == .financeAndNotes && !lock.isUnlocked {
                 // ponytail: Notes isn't gated; per-note lock (Phase 5, SPEC §6.5) will reuse AppLock.isUnlocked.
                 LockView()
@@ -207,7 +211,7 @@ struct ContentView: View {
         case .tasks: tab = .tasks
         case .calendar: tab = .calendar
         case .money: tab = .money
-        case .notes, .news, .settings:
+        case .notes, .news, .wakeUp, .settings:
             tab = .more
             morePath = [destination]
         }

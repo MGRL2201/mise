@@ -9,6 +9,8 @@ enum Storage {
         Attachment.self,
         Tag.self,
         TaskExtras.self,
+        WakeAlarm.self,
+        WakeLog.self,
     ]
 
     /// `groupContainer: .none`: the default (.automatic) moves the store into

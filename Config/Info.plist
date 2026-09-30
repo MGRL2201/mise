@@ -49,6 +49,8 @@
 			</array>
 		</dict>
 	</array>
+	<key>NSAlarmKitUsageDescription</key>
+	<string>mise rings your wake-up alarms, even in silent mode.</string>
 	<key>MiseAppGroup</key>
 	<string>group.$(MISE_BUNDLE_PREFIX).mise</string>
 	<key>MiseKeychainGroup</key>

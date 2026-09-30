@@ -20,6 +20,24 @@ struct Backup: Codable {
     /// Added in version 2; nil in version-1 backups.
     var tags: [String]?
     var taskExtras: [TaskExtrasRecord]?
+    /// Optional: older v2 files lack them.
+    var wakeAlarms: [WakeAlarmRecord]?
+    var wakeLogs: [WakeLogRecord]?
+
+    struct WakeAlarmRecord: Codable {
+        var id: UUID
+        var hour: Int
+        var minute: Int
+        var weekdays: [Int]
+        var isOn: Bool
+    }
+
+    struct WakeLogRecord: Codable {
+        var day: Date
+        var firstRing: Date
+        var reRings: Int
+        var outOfBed: Date?
+    }
 
     struct TaskExtrasRecord: Codable {
         var reminderID: String
@@ -65,12 +83,18 @@ enum BackupService {
                                     subtasks: $0.subtasks, tagNames: ($0.tags ?? []).map(\.name), eventID: $0.eventID,
                                     flagged: $0.flagged, estimateMinutes: $0.estimateMinutes)
         }
+        let wakeAlarms = try context.fetch(FetchDescriptor<WakeAlarm>()).map {
+            Backup.WakeAlarmRecord(id: $0.id, hour: $0.hour, minute: $0.minute, weekdays: $0.weekdays, isOn: $0.isOn)
+        }
+        let wakeLogs = try context.fetch(FetchDescriptor<WakeLog>()).map {
+            Backup.WakeLogRecord(day: $0.day, firstRing: $0.firstRing, reRings: $0.reRings, outOfBed: $0.outOfBed)
+        }
         var settings: [String: Any] = [:]
         for key in Backup.settingsKeys { settings[key] = defaults.object(forKey: key) }
         return try JSONEncoder().encode(Backup(
             version: Backup.currentVersion, createdAt: .now, attachments: attachments,
             settings: PropertyListSerialization.data(fromPropertyList: settings, format: .binary, options: 0),
-            tags: tags, taskExtras: taskExtras))
+            tags: tags, taskExtras: taskExtras, wakeAlarms: wakeAlarms, wakeLogs: wakeLogs))
     }
 
     static func restore(_ data: Data, context: ModelContext, files: AttachmentFileStore, defaults: UserDefaults) throws {
@@ -113,6 +137,26 @@ enum BackupService {
                     extras.estimateMinutes = record.estimateMinutes
                     context.insert(extras)
                     extras.tags = record.tagNames.compactMap { tagsByKey[key($0)] }
+                }
+            }
+            // Files lacking wake alarms/logs leave existing ones alone.
+            if let alarms = backup.wakeAlarms {
+                try context.fetch(FetchDescriptor<WakeAlarm>()).forEach(context.delete)
+                for record in alarms {
+                    let alarm = WakeAlarm(hour: record.hour, minute: record.minute, weekdays: record.weekdays)
+                    alarm.id = record.id
+                    alarm.isOn = record.isOn
+                    context.insert(alarm)
+                }
+            }
+            if let logs = backup.wakeLogs {
+                try context.fetch(FetchDescriptor<WakeLog>()).forEach(context.delete)
+                for record in logs {
+                    let log = WakeLog(firstRing: record.firstRing, calendar: .current)
+                    log.day = record.day
+                    log.reRings = record.reRings
+                    log.outOfBed = record.outOfBed
+                    context.insert(log)
                 }
             }
             try context.save()

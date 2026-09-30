@@ -19,7 +19,7 @@ struct MiseApp: App {
     init() {
         let container = Storage.makeContainer()
         self.container = container
-        AppDependencyManager.shared.add(dependency: container)  // CompleteTaskIntent
+        AppDependencyManager.shared.add(dependency: container)  // CompleteTaskIntent, alarm intents
         let store = EKEventStore()  // one store per app (Apple guidance)
         _reminders = State(initialValue: RemindersStore(eventStore: store, context: container.mainContext))
         _calendar = State(initialValue: CalendarStore(eventStore: store))
@@ -44,6 +44,7 @@ struct MiseApp: App {
                         Task { await WeeklyReview.sync(prompt: false) }
                         #if os(iOS)
                         Self.recordSpikeLaunch()
+                        Task { await WakeAlarms.sync((try? container.mainContext.fetch(FetchDescriptor<WakeAlarm>())) ?? []) }
                         #endif
                     #if os(iOS)
                     case .background:
