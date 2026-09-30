@@ -222,6 +222,12 @@ struct WakeUpTests {
         #expect(!WakePhrase.isTyped(old: "I", new: "I am"))
     }
 
+    @Test func isTypedCountsOnlyTheInsertedRun() {
+        #expect(!WakePhrase.isTyped(old: "abcdefghij", new: "I am awake"))
+        #expect(WakePhrase.isTyped(old: "I m awake", new: "I am awake"))
+        #expect(!WakePhrase.isTyped(old: "aa", new: "aaaaa"))
+    }
+
     // MARK: pending
 
     @Test func pendingRoundTrips() {
@@ -277,8 +283,13 @@ struct WakeUpTests {
         let store = try freshStore(); let context = store.context
         let defaults = UserDefaults(suiteName: UUID().uuidString)!
         let firstRing = date(2026, 10, 1, 7, 0), now = date(2026, 10, 1, 7, 1)
-        _ = WakeFlow.stopped(alarmID: UUID(), firstRing: firstRing, now: now, context: context, defaults: defaults, calendar: calendar)
-        _ = WakeFlow.stopped(alarmID: UUID(), firstRing: firstRing, now: now, context: context, defaults: defaults, calendar: calendar)
+        let first = WakeFlow.stopped(alarmID: UUID(), firstRing: firstRing, now: now, context: context, defaults: defaults, calendar: calendar)
+        // WakeStopIntent cancels the orphaned re-ring before the new stop replaces the pending.
+        #expect(WakeFlow.orphan(stopping: first, now: now, defaults: defaults) == nil)
+        let unrelated = UUID()
+        #expect(WakeFlow.orphan(stopping: unrelated, now: now, defaults: defaults) == first)
+        _ = WakeFlow.stopped(alarmID: unrelated, firstRing: firstRing, now: now, context: context, defaults: defaults, calendar: calendar)
+        #expect(WakePending.current(defaults, now: now)?.reRingID != first)
         #expect(try reRings(context) == 0)
     }
 
@@ -302,7 +313,7 @@ struct WakeUpTests {
         let defaults = UserDefaults(suiteName: UUID().uuidString)!
         let firstRing = date(2026, 10, 1, 7, 0), now = date(2026, 10, 1, 7, 1)
         _ = WakeFlow.stopped(alarmID: UUID(), firstRing: firstRing, now: now, context: context, defaults: defaults, calendar: calendar)
-        let result = try WakeFlow.confirm("nope", phrase: "I am awake", now: now, context: context, defaults: defaults, calendar: calendar)
+        let result = WakeFlow.confirm("nope", phrase: "I am awake", now: now, context: context, defaults: defaults, calendar: calendar)
         #expect(result == nil)
         #expect(WakePending.current(defaults, now: now) != nil)
         #expect(try context.fetch(FetchDescriptor<WakeLog>()).first?.outOfBed == nil)
@@ -313,7 +324,7 @@ struct WakeUpTests {
         let defaults = UserDefaults(suiteName: UUID().uuidString)!
         let firstRing = date(2026, 10, 1, 7, 0), stop = date(2026, 10, 1, 7, 1), now = date(2026, 10, 1, 7, 3)
         let id = WakeFlow.stopped(alarmID: UUID(), firstRing: firstRing, now: stop, context: context, defaults: defaults, calendar: calendar)
-        let result = try WakeFlow.confirm("i am awake", phrase: "I am awake", now: now, context: context, defaults: defaults, calendar: calendar)
+        let result = WakeFlow.confirm("i am awake", phrase: "I am awake", now: now, context: context, defaults: defaults, calendar: calendar)
         #expect(result?.reRingID == id)
         #expect(try context.fetch(FetchDescriptor<WakeLog>()).first?.outOfBed == now)
         #expect(WakePending.current(defaults, now: now) == nil)
@@ -323,7 +334,7 @@ struct WakeUpTests {
         let store = try freshStore(); let context = store.context
         let defaults = UserDefaults(suiteName: UUID().uuidString)!
         let now = date(2026, 10, 1, 7, 3)
-        #expect(try WakeFlow.confirm("I am awake", phrase: "I am awake", now: now, context: context, defaults: defaults, calendar: calendar) == nil)
+        #expect(WakeFlow.confirm("I am awake", phrase: "I am awake", now: now, context: context, defaults: defaults, calendar: calendar) == nil)
         #expect(try context.fetch(FetchDescriptor<WakeLog>()).isEmpty)
     }
 

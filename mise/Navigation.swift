@@ -92,21 +92,22 @@ struct ContentView: View {
     #endif
 
     /// macOS holds sheets back while the whole app is locked (an attached sheet
-    /// blocks the main window's lock overlay). iOS covers sheets with the lock window.
+    /// blocks the main window's lock overlay). iOS covers sheets with the lock window,
+    /// but holds them while the wake-up cover is up (a sheet blocks presenting it).
     private var holdSheets: Bool {
         #if os(macOS)
         lock.mode == .wholeApp && !lock.isUnlocked
         #else
-        false
+        wake.isPresented
         #endif
     }
 
     var body: some View {
         root
             .sheet(isPresented: Binding { planning.isPresented && !holdSheets }
-                   set: { planning.isPresented = $0 }) { PlanningView() }
+                   set: { if !holdSheets { planning.isPresented = $0 } }) { PlanningView() }
             .sheet(isPresented: Binding { planning.isWeeklyReviewPresented && !holdSheets }
-                   set: { planning.isWeeklyReviewPresented = $0 }) { WeeklyReviewView() }
+                   set: { if !holdSheets { planning.isWeeklyReviewPresented = $0 } }) { WeeklyReviewView() }
             #if os(iOS)
             .fullScreenCover(isPresented: $wake.isPresented) { WakeConfirmView() }
             #endif

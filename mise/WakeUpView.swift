@@ -18,6 +18,7 @@ struct WakeUpView: View {
     @State private var isAdding = false
     @State private var errorMessage: String?
     @AppStorage(WakePhrase.key) private var phrase = WakePhrase.standard
+    @AppStorage(WakePending.key) private var pendingData: Data?  // observed so the confirm row tracks Stop/confirm
     #endif
 
     private static var recentLogs: FetchDescriptor<WakeLog> {
@@ -29,7 +30,7 @@ struct WakeUpView: View {
     var body: some View {
         Form {
             #if os(iOS)
-            if WakePending.current() != nil {
+            if pendingData != nil, WakePending.current() != nil {
                 Section { Button("Confirm you're up") { WakePrompt.shared.show() } }
                     .listRowBackground(Color(theme.surface))
             }
@@ -211,7 +212,7 @@ struct WakeConfirmView: View {
     }
 
     private func confirm() {
-        guard let pending = try? WakeFlow.confirm(typed, phrase: phrase, now: .now, context: modelContext, defaults: .standard) else { return }
+        guard let pending = WakeFlow.confirm(typed, phrase: phrase, now: .now, context: modelContext, defaults: .standard) else { return }
         if let id = pending.reRingID { WakeAlarms.cancel(id) }
         let center = UNUserNotificationCenter.current()
         center.removeDeliveredNotifications(withIdentifiers: [WakePrompt.notificationID])

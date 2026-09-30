@@ -151,9 +151,13 @@ enum WakePhrase {
         return !typed.isEmpty && typed == target
     }
 
-    /// Paste guard: accept a text change only if it adds at most 2 characters (deletions always accepted).
+    /// Paste guard: accept a text change only if the inserted run (new minus the common prefix and
+    /// non-overlapping common suffix) is at most 2 characters, so pasting over a selection fails.
     static func isTyped(old: String, new: String) -> Bool {
-        new.count - old.count <= 2
+        let prefix = zip(old, new).prefix { $0 == $1 }.count
+        let suffix = zip(old.reversed(), new.reversed())
+            .prefix(min(old.count, new.count) - prefix).prefix { $0 == $1 }.count
+        return new.count - prefix - suffix <= 2
     }
 }
 
@@ -176,12 +180,20 @@ enum WakeFlow {
         return next
     }
 
+    /// The pending re-ring that stopping `alarmID` would replace without stopping (another alarm's stop).
+    /// Caller cancels it before `stopped`, else that chain rings forever outside the cap.
+    static func orphan(stopping alarmID: UUID?, now: Date, defaults: UserDefaults) -> UUID? {
+        guard let id = WakePending.current(defaults, now: now)?.reRingID, id != alarmID else { return nil }
+        return id
+    }
+
     /// Correct phrase with a current pending: logs out-of-bed, clears the pending and returns it
     /// (caller cancels its `reRingID`). Wrong phrase or no pending: changes nothing, returns nil.
     static func confirm(_ typed: String, phrase: String, now: Date, context: ModelContext, defaults: UserDefaults,
-                        calendar: Calendar = .current) throws -> WakePending? {
+                        calendar: Calendar = .current) -> WakePending? {
         guard let pending = WakePending.current(defaults, now: now), WakePhrase.matches(typed, phrase: phrase) else { return nil }
-        try WakeLog.record(firstRing: pending.firstRing, outOfBed: true, now: now, context: context, calendar: calendar)
+        // A failed save must never keep the alarm ringing.
+        _ = try? WakeLog.record(firstRing: pending.firstRing, outOfBed: true, now: now, context: context, calendar: calendar)
         WakePending.clear(defaults)
         return pending
     }
@@ -252,8 +264,10 @@ enum WakeAlarms {
         let outdated = UserDefaults.standard.integer(forKey: versionKey) < version
         // Only touch AlarmKit alarms still .scheduled: reschedule/cancel would kill an alarm
         // that's currently ringing (.alerting) or mid-snooze (.countdown/.paused).
+        var skipped = false
         for alarm in on {
             let match = scheduled.first(where: { $0.id == alarm.id })
+            if outdated, let match, match.state != .scheduled { skipped = true }
             if match == nil || (match?.state == .scheduled && (outdated || match?.schedule != schedule(for: alarm))) {
                 try? await schedule(alarm)
             }
@@ -261,7 +275,8 @@ enum WakeAlarms {
         for alarm in scheduled where !onIDs.contains(alarm.id) && alarm.state == .scheduled {
             if case .relative = alarm.schedule { cancel(alarm.id) }
         }
-        UserDefaults.standard.set(version, forKey: versionKey)
+        // Keep the old version while an outdated alarm is ringing/snoozed so a later sync updates it.
+        if !skipped { UserDefaults.standard.set(version, forKey: versionKey) }
     }
 }
 
@@ -288,9 +303,10 @@ struct WakeStopIntent: LiveActivityIntent {
         let stopped = UUID(uuidString: alarmID)
         if let stopped { try? AlarmManager.shared.stop(id: stopped) }
         let firstRing = WakeSchedule.firstRing(hour: hour, minute: minute, now: .now, calendar: .current)
+        if let orphan = WakeFlow.orphan(stopping: stopped, now: .now, defaults: .standard) { WakeAlarms.cancel(orphan) }
         if let id = WakeFlow.stopped(alarmID: stopped, firstRing: firstRing, now: .now, context: container.mainContext, defaults: .standard) {
             // same hour:minute, so every ring of this morning lands in one log
-            _ = try await AlarmManager.shared.schedule(id: id, configuration: WakeAlarms.configuration(
+            _ = try? await AlarmManager.shared.schedule(id: id, configuration: WakeAlarms.configuration(
                 alarmID: id, hour: hour, minute: minute, schedule: .fixed(.now + WakeSchedule.reRingDelay)))
         }
         if await LocalNotifications.authorized(prompt: false) {
