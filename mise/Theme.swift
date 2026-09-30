@@ -67,8 +67,8 @@ struct Palette: Codable, Equatable {
     ]
 }
 
-private extension Color.Resolved {
-    init(_ hex: UInt32) {
+extension Color.Resolved {
+    nonisolated init(_ hex: UInt32) {
         self.init(red: Float(hex >> 16 & 0xFF) / 255, green: Float(hex >> 8 & 0xFF) / 255,
                   blue: Float(hex & 0xFF) / 255)
     }

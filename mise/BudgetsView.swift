@@ -5,9 +5,7 @@ extension Category {
     var tint: Color { Self.tint(color) }
 
     /// 0xRRGGBB → Color.
-    static func tint(_ hex: Int) -> Color {
-        Color(red: Double(hex >> 16 & 0xFF) / 255, green: Double(hex >> 8 & 0xFF) / 255, blue: Double(hex & 0xFF) / 255)
-    }
+    static func tint(_ hex: Int) -> Color { Color(Color.Resolved(UInt32(hex))) }
 }
 
 /// Month-by-month spend per category against its budget (#37).
@@ -25,7 +23,7 @@ struct BudgetsView: View {
         let interval = Calendar.current.dateInterval(of: .month, for: month)!
         let spent = Budgets.spent(transactions, in: interval, rates: rates, home: home)
         let ordered = Budgets.ordered(categories)
-        let budgets = ordered.compactMap(\.budget)
+        let budgeted = ordered.filter { $0.budget != nil }
         Form {
             Section {
                 HStack {
@@ -40,8 +38,13 @@ struct BudgetsView: View {
             }
             .listRowBackground(Color(theme.surface))
             Section("Total") {
-                amounts(spent.byCategory.values.reduce(spent.uncategorized, +),
-                        budget: budgets.isEmpty ? nil : budgets.reduce(0, +))
+                LabeledContent("Spent", value: spent.byCategory.values.reduce(spent.uncategorized, +),
+                               format: .currency(code: home))
+                // Bar: budgeted categories only, so unbudgeted spend can't push it red.
+                if !budgeted.isEmpty {
+                    amounts(budgeted.reduce(0) { $0 + (spent.byCategory[$1.id] ?? 0) },
+                            budget: budgeted.compactMap(\.budget).reduce(0, +))
+                }
                 ForEach(spent.unconverted.filter { $0.value != 0 }.sorted { $0.key < $1.key }, id: \.key) { code, amount in
                     Text("\(amount.formatted(.currency(code: code))) (no rate)").foregroundStyle(.secondary)
                 }
@@ -129,17 +132,23 @@ struct CategoryEditor: View {
         _budget = State(initialValue: category?.budget.map(Accounts.plain) ?? "")
     }
 
-    /// .some(nil) = no budget; nil = invalid.
+    /// nil once deleted (backup restore, task 3 delete): the sheet must not read or write a dead model.
+    private var live: Category? {
+        guard let category, !category.isDeleted, category.modelContext != nil else { return nil }
+        return category
+    }
+
+    /// .some(nil) = no budget (empty or 0); nil = invalid (negative / unparseable).
     private var budgetValue: Decimal?? {
         if budget.trimmingCharacters(in: .whitespaces).isEmpty { return .some(nil) }
-        guard let value = Accounts.parseAmount(budget), value > 0 else { return nil }
-        return value
+        guard let value = Accounts.parseAmount(budget), value >= 0 else { return nil }
+        return value == 0 ? .some(nil) : value
     }
 
     private var trimmed: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     private var duplicate: Bool {
-        Budgets.named(trimmed, in: categories).map { $0.id != category?.id } ?? false
+        Budgets.named(trimmed, in: categories.filter { $0.id != live?.id }) != nil
     }
 
     var body: some View {
@@ -177,15 +186,15 @@ struct CategoryEditor: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save", action: save)
-                        .disabled(trimmed.isEmpty || duplicate || budgetValue == nil)
+                        .disabled(trimmed.isEmpty || duplicate || budgetValue == nil || (category != nil && live == nil))
                 }
             }
         }
     }
 
     private func save() {
-        guard let budgetValue else { return }
-        let target = category ?? Category(name: "")
+        guard let budgetValue, category == nil || live != nil else { return dismiss() }
+        let target = live ?? Category(name: "")
         if category == nil {
             target.sortOrder = (categories.map(\.sortOrder).max() ?? -1) + 1
             modelContext.insert(target)

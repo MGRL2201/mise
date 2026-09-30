@@ -81,6 +81,9 @@ extension Accounts {
             category.budget = budget.map { Decimal($0) }
         }
         let day: TimeInterval = 86_400
+        // Clamp into this month (order kept) so the Budgets screen has spend on the 1st-3rd too.
+        let monthStart = Calendar.current.dateInterval(of: .month, for: .now)!.start
+        func date(_ ago: TimeInterval) -> Date { max(.now - ago, monthStart + (3 * day - ago) / 1_000) }
         let rows: [(String, String, Category, TimeInterval)] = [
             ("Salary", "5200", income, 2 * day + 3_600),
             ("FairPrice", "-84.35", groceries, 2 * day),
@@ -92,13 +95,13 @@ extension Accounts {
             ("FairPrice", "-6.75", groceries, 600),
         ]
         for (merchant, amount, category, ago) in rows {
-            let transaction = Transaction(amount: Decimal(string: amount)!, currency: "SGD", date: .now - ago)
+            let transaction = Transaction(amount: Decimal(string: amount)!, currency: "SGD", date: date(ago))
             transaction.merchant = merchant
             transaction.account = dbs
             transaction.category = category
             context.insert(transaction)
         }
-        let coffee = Transaction(amount: Decimal(string: "-6.50")!, currency: "USD", date: .now - 3 * day)
+        let coffee = Transaction(amount: Decimal(string: "-6.50")!, currency: "USD", date: date(3 * day))
         coffee.merchant = "Blue Bottle"
         coffee.notes = "SF trip"
         coffee.accountAmount = Decimal(string: "-8.80")!
