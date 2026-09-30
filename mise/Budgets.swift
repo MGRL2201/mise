@@ -51,6 +51,17 @@ enum Budgets {
         return categories.first { $0.name.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare(name) == .orderedSame }
     }
 
+    /// Moves `category`'s transactions to `target` (nil = uncategorized), then deletes it.
+    @MainActor
+    static func delete(_ category: Category, reassigningTo target: Category?, context: ModelContext) {
+        for transaction in category.transactions ?? [] {
+            transaction.category = target
+            transaction.categoryIsAuto = false
+        }
+        context.delete(category)
+        try? context.save()
+    }
+
     /// Home-currency outflows in `month` per category id (via `Finance.homeSpend`).
     /// Refunds (positive amounts) do not net off spending.
     static func spent(

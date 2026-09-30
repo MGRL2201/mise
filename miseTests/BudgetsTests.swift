@@ -124,4 +124,23 @@ struct BudgetsTests {
         #expect(Budgets.named("a9\n", in: categories) === a1)
         #expect(Budgets.named("a", in: categories) == nil)
     }
+
+    @Test func deleteReassignsOrUncategorizes() throws {
+        let food = mise.Category(name: "Food")
+        let dining = mise.Category(name: "Dining")
+        let misc = mise.Category(name: "Misc")
+        [food, dining, misc].forEach(context.insert)
+        let moved = transaction(-10, food)
+        moved.categoryIsAuto = true
+        let orphan = transaction(-5, misc)
+        try context.save()
+
+        Budgets.delete(food, reassigningTo: dining, context: context)
+        #expect(moved.category === dining)
+        #expect(!moved.categoryIsAuto)
+
+        Budgets.delete(misc, reassigningTo: nil, context: context)
+        #expect(orphan.category == nil)
+        #expect(try context.fetch(FetchDescriptor<mise.Category>()).map(\.name) == ["Dining"])
+    }
 }

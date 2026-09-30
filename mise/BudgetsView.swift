@@ -75,7 +75,9 @@ struct BudgetsView: View {
         .navigationTitle("Budgets")
         .themedBackground()
         .toolbar {
-            // Task 3 (#37): NavigationLink("Categories") { CategoriesView() } goes here.
+            ToolbarItem(placement: .secondaryAction) {
+                NavigationLink("Categories") { CategoriesView() }
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button("New Category", systemImage: "plus") { isAdding = true }
             }
@@ -103,7 +105,99 @@ struct BudgetsView: View {
     }
 }
 
-/// New or existing category: name, icon, color, monthly budget. Delete lives in CategoriesView (task 3).
+/// Add, edit, reorder and delete categories (#37).
+struct CategoriesView: View {
+    @Environment(\.theme) private var theme
+    @Environment(\.modelContext) private var modelContext
+    @Query private var categories: [Category]
+    @State private var editing: Category?
+    @State private var isAdding = false
+    @State private var deleting: Category?
+    @State private var moving: Category?
+
+    var body: some View {
+        let ordered = Budgets.ordered(categories)
+        List {
+            ForEach(ordered) { category in
+                Button { editing = category } label: {
+                    HStack {
+                        label(category)
+                        Spacer()
+                        Text("\(category.transactions?.count ?? 0)").foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .onMove { offsets, destination in
+                var reordered = ordered
+                reordered.move(fromOffsets: offsets, toOffset: destination)
+                for (index, category) in reordered.enumerated() { category.sortOrder = index }
+                try? modelContext.save()
+            }
+            .onDelete { offsets in
+                guard let category = offsets.first.map({ ordered[$0] }) else { return }
+                if category.transactions?.isEmpty ?? true {
+                    Budgets.delete(category, reassigningTo: nil, context: modelContext)
+                } else {
+                    deleting = category
+                }
+            }
+            .listRowBackground(Color(theme.surface))
+        }
+        .navigationTitle("Categories")
+        .themedBackground()
+        .toolbar {
+            #if os(iOS)
+            ToolbarItem(placement: .secondaryAction) { EditButton() }
+            #endif
+            ToolbarItem(placement: .primaryAction) {
+                Button("New Category", systemImage: "plus") { isAdding = true }
+            }
+        }
+        .confirmationDialog(Text("Delete \(deleting?.name ?? "")?"),
+                            isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+                            titleVisibility: .visible, presenting: deleting) { category in
+            Button("Leave Uncategorized", role: .destructive) {
+                Budgets.delete(category, reassigningTo: nil, context: modelContext)
+            }
+            Button("Move to…") { moving = category }
+        } message: { category in
+            Text("\(category.transactions?.count ?? 0) transactions use this category.")
+        }
+        .sheet(isPresented: $isAdding) { CategoryEditor(category: nil) }
+        .sheet(item: $editing) { CategoryEditor(category: $0) }
+        .sheet(item: $moving) { category in
+            NavigationStack {
+                List(ordered.filter { $0.id != category.id }) { target in
+                    Button {
+                        Budgets.delete(category, reassigningTo: target, context: modelContext)
+                        moving = nil
+                    } label: {
+                        label(target).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .listRowBackground(Color(theme.surface))
+                }
+                .navigationTitle("Move to")
+                .themedBackground()
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { moving = nil } }
+                }
+            }
+        }
+    }
+
+    private func label(_ category: Category) -> some View {
+        Label {
+            Text(category.name)
+        } icon: {
+            Image(systemName: category.icon).foregroundStyle(category.tint)
+        }
+    }
+}
+
+/// New or existing category: name, icon, color, monthly budget. Delete lives in CategoriesView.
 struct CategoryEditor: View {
     let category: Category?
     @Environment(\.modelContext) private var modelContext
