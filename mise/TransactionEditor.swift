@@ -90,7 +90,7 @@ struct TransactionEditor: View {
                 Section {
                     Picker("Category", selection: $category) {
                         Text("None").tag(Category?.none)
-                        ForEach(categories.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }, id: \.self) {
+                        ForEach(Budgets.ordered(categories), id: \.self) {
                             Text($0.name).tag(Optional($0))
                         }
                     }
@@ -138,14 +138,15 @@ struct TransactionEditor: View {
         }
     }
 
-    // ponytail: inserted immediately, so Cancel keeps a new category; full management is #37.
+    // ponytail: inserted immediately, so Cancel keeps a new category; rename/delete it in Categories.
     private func addCategory() {
         let name = newCategory.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
-        if let existing = categories.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) {
+        if let existing = Budgets.named(name, in: categories) {
             category = existing
         } else {
             let created = Category(name: name)
+            created.sortOrder = (categories.map(\.sortOrder).max() ?? -1) + 1
             modelContext.insert(created)
             category = created
         }
@@ -169,7 +170,11 @@ struct TransactionEditor: View {
         target.homeAmount = nil // FX.refresh refills it for the new amount/currency/date.
         try? modelContext.save()
         let context = modelContext
-        Task { await FX.refresh(context: context) }
+        let (savedCategory, savedDate) = (category, date)
+        Task {
+            await FX.refresh(context: context)
+            await Budgets.checkAlerts(for: savedCategory, on: savedDate, context: context)
+        }
         dismiss()
     }
 }

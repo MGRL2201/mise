@@ -270,6 +270,7 @@ struct AccountDetailView: View {
     @State private var rates: FXRates
     @Environment(\.theme) private var theme
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
     @State private var editing = false
     @State private var newTransaction = false
     @State private var newTransfer = false
@@ -282,8 +283,13 @@ struct AccountDetailView: View {
         _rates = State(initialValue: rates)
     }
 
-    /// Editors run FX.refresh on save; pick up any rates it fetched.
-    private func reloadRates() { rates = .load() }
+    /// Editors start FX.refresh on save without awaiting it; await one here, then pick up the rates.
+    private func reloadRates() {
+        Task {
+            await FX.refresh(context: modelContext)
+            rates = .load()
+        }
+    }
 
     var body: some View {
         Group {
@@ -453,7 +459,7 @@ struct AllTransactionsView: View {
                     }
                     Picker("Category", selection: $category) {
                         Text("All").tag(Category?.none)
-                        ForEach(categories.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }, id: \.self) {
+                        ForEach(Budgets.ordered(categories), id: \.self) {
                             Text($0.name).tag(Optional($0))
                         }
                     }

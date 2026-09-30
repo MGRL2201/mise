@@ -306,6 +306,8 @@ struct CategoryEditor: View {
         target.color = color
         target.budget = budgetValue
         try? modelContext.save()
+        // Ask for notification permission once, when a budget is first set; checkAlerts never prompts.
+        if budgetValue != nil, !Storage.inMemory { Task { _ = await LocalNotifications.authorized(prompt: true) } }
         dismiss()
     }
 }
