@@ -128,29 +128,38 @@ enum WakeAlarms {
                       secondaryIntent: StillInBedIntent(alarmID: id, hour: hour, minute: minute))
     }
 
+    /// The weekly AlarmKit schedule for `alarm`; nil if it has no valid weekday (1...7).
+    static func schedule(for alarm: WakeAlarm) -> Alarm.Schedule? {
+        let days: [Locale.Weekday] = [.sunday, .monday, .tuesday, .wednesday, .thursday, .friday, .saturday]
+        let weekdays = alarm.weekdays.compactMap { (1...7).contains($0) ? days[$0 - 1] : nil }
+        guard !weekdays.isEmpty else { return nil }
+        return .relative(.init(time: .init(hour: alarm.hour, minute: alarm.minute), repeats: .weekly(weekdays)))
+    }
+
     static func schedule(_ alarm: WakeAlarm) async throws {
         cancel(alarm.id)
-        guard alarm.isOn else { return }
-        let days: [Locale.Weekday] = [.sunday, .monday, .tuesday, .wednesday, .thursday, .friday, .saturday]
-        let relative = Alarm.Schedule.Relative(time: .init(hour: alarm.hour, minute: alarm.minute),
-                                               repeats: .weekly(alarm.weekdays.map { days[$0 - 1] }))
+        guard alarm.isOn, let schedule = schedule(for: alarm) else { return }
         _ = try await AlarmManager.shared.schedule(
-            id: alarm.id, configuration: configuration(alarmID: alarm.id, hour: alarm.hour, minute: alarm.minute, schedule: .relative(relative)))
+            id: alarm.id, configuration: configuration(alarmID: alarm.id, hour: alarm.hour, minute: alarm.minute, schedule: schedule))
+    }
+
+    static func message(for error: Error) -> String {
+        if case AlarmManager.AlarmError.maximumLimitReached = error { return "Too many alarms are set. Turn one off and try again." }
+        return error.localizedDescription
     }
 
     static func cancel(_ id: UUID) {
         try? AlarmManager.shared.cancel(id: id)
     }
 
-    /// Schedules on-alarms AlarmKit lacks (e.g. after a backup restore) and cancels
-    /// weekly AlarmKit alarms with no on-alarm. Pending `.fixed` re-rings are left alone.
+    /// Schedules on-alarms AlarmKit lacks or has at another time (e.g. after a backup
+    /// restore) and cancels weekly AlarmKit alarms with no on-alarm. Pending `.fixed` re-rings are left alone.
     static func sync(_ alarms: [WakeAlarm]) async {
         guard AlarmManager.shared.authorizationState == .authorized,
               let scheduled = try? AlarmManager.shared.alarms else { return }
         let on = alarms.filter(\.isOn)
         let onIDs = Set(on.map(\.id))
-        let scheduledIDs = Set(scheduled.map(\.id))
-        for alarm in on where !scheduledIDs.contains(alarm.id) {
+        for alarm in on where scheduled.first(where: { $0.id == alarm.id })?.schedule != schedule(for: alarm) {
             try? await schedule(alarm)
         }
         for alarm in scheduled where !onIDs.contains(alarm.id) {
@@ -177,6 +186,7 @@ struct OutOfBedIntent: LiveActivityIntent {
     }
 
     @MainActor func perform() async throws -> some IntentResult {
+        if let id = UUID(uuidString: alarmID) { try? AlarmManager.shared.stop(id: id) }
         let firstRing = WakeSchedule.firstRing(hour: hour, minute: minute, now: .now, calendar: .current)
         try WakeLog.record(firstRing: firstRing, outOfBed: true, now: .now, context: container.mainContext)
         return .result()
@@ -203,8 +213,9 @@ struct StillInBedIntent: LiveActivityIntent {
     @MainActor func perform() async throws -> some IntentResult {
         if let id = UUID(uuidString: alarmID) { try? AlarmManager.shared.stop(id: id) }
         let firstRing = WakeSchedule.firstRing(hour: hour, minute: minute, now: .now, calendar: .current)
-        let log = try WakeLog.record(firstRing: firstRing, outOfBed: false, now: .now, context: container.mainContext)
-        if log.reRings <= WakeSchedule.maxReRings {
+        // Logging must never block the re-ring.
+        let log = try? WakeLog.record(firstRing: firstRing, outOfBed: false, now: .now, context: container.mainContext)
+        if (log?.reRings ?? 0) <= WakeSchedule.maxReRings {
             let id = UUID()  // same hour:minute, so every ring of this morning lands in one log
             _ = try await AlarmManager.shared.schedule(id: id, configuration: WakeAlarms.configuration(
                 alarmID: id, hour: hour, minute: minute, schedule: .fixed(.now + WakeSchedule.reRingDelay)))

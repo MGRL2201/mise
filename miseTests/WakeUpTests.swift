@@ -1,6 +1,9 @@
 import Testing
 import SwiftData
 import Foundation
+#if os(iOS)
+import AlarmKit
+#endif
 @testable import mise
 
 @MainActor
@@ -192,4 +195,22 @@ struct WakeUpTests {
         let alarms = try target.fetch(FetchDescriptor<WakeAlarm>())
         #expect(alarms.map(\.id) == [existing.id])
     }
+
+    #if os(iOS)
+    // MARK: AlarmKit schedule
+
+    @Test func scheduleIsWeeklyRelativeAtAlarmTime() {
+        let schedule = WakeAlarms.schedule(for: WakeAlarm(hour: 6, minute: 30, weekdays: [2, 6]))
+        #expect(schedule == .relative(.init(time: .init(hour: 6, minute: 30), repeats: .weekly([.monday, .friday]))))
+    }
+
+    @Test func outOfRangeWeekdaysAreDropped() {
+        let schedule = WakeAlarms.schedule(for: WakeAlarm(hour: 6, minute: 30, weekdays: [0, 2, 8]))
+        #expect(schedule == .relative(.init(time: .init(hour: 6, minute: 30), repeats: .weekly([.monday]))))
+    }
+
+    @Test func noValidWeekdaysMeansNoSchedule() {
+        #expect(WakeAlarms.schedule(for: WakeAlarm(hour: 6, minute: 30, weekdays: [0, 9])) == nil)
+    }
+    #endif
 }

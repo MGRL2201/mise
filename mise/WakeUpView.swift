@@ -15,6 +15,7 @@ struct WakeUpView: View {
     @State private var auth = AlarmManager.shared.authorizationState
     @State private var editing: WakeAlarm?
     @State private var isAdding = false
+    @State private var errorMessage: String?
     #endif
 
     private static var recentLogs: FetchDescriptor<WakeLog> {
@@ -49,6 +50,8 @@ struct WakeUpView: View {
         }
         .sheet(item: $editing) { WakeAlarmEditor(alarm: $0) }
         .sheet(isPresented: $isAdding) { WakeAlarmEditor(alarm: nil) }
+        .scheduleErrorAlert($errorMessage)
+        .onChange(of: auth) { if auth == .authorized { Task { await WakeAlarms.sync(alarms) } } }
         .task {
             await WakeAlarms.sync(alarms)
             for await state in AlarmManager.shared.authorizationUpdates { auth = state }
@@ -114,7 +117,15 @@ struct WakeUpView: View {
             Toggle("On", isOn: Binding { alarm.isOn } set: {
                 alarm.isOn = $0
                 try? modelContext.save()
-                Task { try await WakeAlarms.schedule(alarm) }
+                Task {
+                    do {
+                        try await WakeAlarms.schedule(alarm)
+                    } catch {
+                        alarm.isOn = false
+                        try? modelContext.save()
+                        errorMessage = WakeAlarms.message(for: error)
+                    }
+                }
             })
             .labelsHidden()
         }
@@ -143,7 +154,8 @@ struct WakeUpView: View {
     /// "Rang 6:30 · 3 re-rings · Up 6:47".
     private static func summary(_ log: WakeLog) -> String {
         let rang = log.firstRing.formatted(date: .omitted, time: .shortened)
-        let reRings = log.reRings == 1 ? "1 re-ring" : "\(log.reRings) re-rings"
+        let count = min(log.reRings, WakeSchedule.maxReRings)  // a tap on the last ring still counts one
+        let reRings = count == 1 ? "1 re-ring" : "\(count) re-rings"
         let up = log.outOfBed.map { "Up " + $0.formatted(date: .omitted, time: .shortened) } ?? "Not up yet"
         return "Rang \(rang) · \(reRings) · \(up)"
     }
@@ -216,10 +228,7 @@ private struct WakeAlarmEditor: View {
                     Button("Save") { Task { await save() } }.disabled(weekdays.isEmpty)
                 }
             }
-            .alert("Couldn't schedule this alarm.", isPresented: Binding { errorMessage != nil } set: { if !$0 { errorMessage = nil } }) {
-            } message: {
-                Text(errorMessage ?? "")
-            }
+            .scheduleErrorAlert($errorMessage)
         }
     }
 
@@ -233,14 +242,24 @@ private struct WakeAlarmEditor: View {
         target.hour = parts.hour ?? 7
         target.minute = parts.minute ?? 0
         target.weekdays = weekdays.sorted()
+        target.isOn = true
         try? modelContext.save()
         do {
             try await WakeAlarms.schedule(target)
             dismiss()
-        } catch AlarmManager.AlarmError.maximumLimitReached {
-            errorMessage = "Too many alarms are set. Turn one off and try again."
         } catch {
-            errorMessage = error.localizedDescription
+            target.isOn = false
+            try? modelContext.save()
+            errorMessage = WakeAlarms.message(for: error)
+        }
+    }
+}
+
+private extension View {
+    func scheduleErrorAlert(_ message: Binding<String?>) -> some View {
+        alert("Couldn't schedule this alarm.", isPresented: Binding { message.wrappedValue != nil } set: { if !$0 { message.wrappedValue = nil } }) {
+        } message: {
+            Text(message.wrappedValue ?? "")
         }
     }
 }

@@ -337,6 +337,9 @@ struct SettingsView: View {
             store.reload()
             lock.reload()
             calendars.reloadSettings()
+            #if os(iOS)
+            Task { await WakeAlarms.sync((try? modelContext.fetch(FetchDescriptor<WakeAlarm>())) ?? []) }
+            #endif
         } catch {
             backupError = error.localizedDescription
         }
