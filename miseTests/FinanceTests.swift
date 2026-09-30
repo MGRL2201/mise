@@ -79,6 +79,22 @@ struct FinanceTests {
         #expect(Finance.balance(of: account, rates: rates) == Decimal(string: "-13.18"))
     }
 
+    @Test func balanceUsesStoredAccountAmountForForeignTransaction() throws {
+        let account = Account(name: "Main", type: .debit, currency: "SGD")
+        context.insert(account)
+        transaction(-10, on: account, currency: "USD").accountAmount = Decimal(string: "-13.50")
+        try context.save()
+        #expect(Finance.balance(of: account, rates: FXRates()) == Decimal(string: "-13.50"))
+    }
+
+    @Test func balanceSkipsForeignTransactionWithoutAccountAmountOrRate() throws {
+        let account = Account(name: "Main", type: .debit, currency: "SGD", openingBalance: 5)
+        context.insert(account)
+        transaction(-10, on: account, currency: "USD")
+        try context.save()
+        #expect(Finance.balance(of: account, rates: FXRates()) == 5)
+    }
+
     @Test func homeSpendConvertsToHomeCurrencyAndSeparatesUnconverted() {
         let day = FXRates.day(start)
         var rates = FXRates()

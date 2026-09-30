@@ -71,6 +71,9 @@ final class Transaction {
     var source: TransactionSource = TransactionSource.manual
     /// Amount in the home currency at the transaction date's FX rate. Filled by #34; nil until then.
     var homeAmount: Decimal?
+    /// Signed amount in the account's currency, set when `currency` differs from the
+    /// account's (the foreign-currency charge as it hit the account). nil = same currency or unknown.
+    var accountAmount: Decimal?
 
     init(amount: Decimal, currency: String, date: Date) {
         self.amount = amount
@@ -104,12 +107,12 @@ final class Transfer {
 enum Finance {
     /// Opening balance + own-currency transactions − transfers out + transfers in.
     /// Credit accounts go negative when owed.
-    /// Foreign-currency transactions convert at the FX rate of their date; #36 should
-    /// store the account-currency amount charged at entry and use it instead.
-    // ponytail: no per-transaction converted amount cached yet; see #36.
+    /// Foreign-currency transactions use their stored `accountAmount`.
     static func balance(of account: Account, rates: FXRates = .load()) -> Decimal {
         let transactions = (account.transactions ?? []).reduce(Decimal(0)) { total, transaction in
             if transaction.currency == account.currency { return total + transaction.amount }
+            if let accountAmount = transaction.accountAmount { return total + accountAmount }
+            // No stored charge: fall back to the FX rate of the transaction's date; skip if none.
             guard let converted = FX.convert(
                 transaction.amount, from: transaction.currency, to: account.currency,
                 rates: rates.rates(on: FXRates.day(transaction.date)) ?? [:]

@@ -60,6 +60,7 @@ struct Backup: Codable {
         var attachmentID: UUID?
         var source: TransactionSource
         var homeAmount: Decimal?
+        var accountAmount: Decimal?
     }
 
     struct TransferRecord: Codable {
@@ -148,7 +149,8 @@ enum BackupService {
             Backup.TransactionRecord(id: $0.id, amount: $0.amount, currency: $0.currency, date: $0.date,
                                      merchant: $0.merchant, notes: $0.notes, accountID: $0.account?.id,
                                      categoryID: $0.category?.id, categoryIsAuto: $0.categoryIsAuto,
-                                     attachmentID: $0.attachmentID, source: $0.source, homeAmount: $0.homeAmount)
+                                     attachmentID: $0.attachmentID, source: $0.source, homeAmount: $0.homeAmount,
+                                     accountAmount: $0.accountAmount)
         }
         let transfers = try context.fetch(FetchDescriptor<Transfer>()).map {
             Backup.TransferRecord(id: $0.id, fromID: $0.from?.id, toID: $0.to?.id, amount: $0.amount,
@@ -257,6 +259,7 @@ enum BackupService {
                     transaction.attachmentID = record.attachmentID
                     transaction.source = record.source
                     transaction.homeAmount = record.homeAmount
+                    transaction.accountAmount = record.accountAmount
                     context.insert(transaction)
                     transaction.account = record.accountID.flatMap { accounts[$0] }
                     transaction.category = record.categoryID.flatMap { categories[$0] }
