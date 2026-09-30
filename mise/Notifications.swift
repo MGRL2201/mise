@@ -34,6 +34,8 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate {
             await MainActor.run { PlanningPrompt.shared.showDaily() }
         } else if id.hasPrefix(WeeklyReview.identifier) {
             await MainActor.run { PlanningPrompt.shared.showWeekly() }
+        } else if id.hasPrefix(WakePrompt.notificationID) {
+            await MainActor.run { WakePrompt.shared.show() }
         }
     }
 

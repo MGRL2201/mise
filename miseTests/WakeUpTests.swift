@@ -196,6 +196,137 @@ struct WakeUpTests {
         #expect(alarms.map(\.id) == [existing.id])
     }
 
+    // MARK: phrase
+
+    @Test func phraseMatchesIgnoringCaseSpacingAndTrailingPunctuation() {
+        for typed in ["  i  AM awake!! ", "I am awake.", "i am awake?", "I am awake"] {
+            #expect(WakePhrase.matches(typed, phrase: "I am awake"), "\(typed)")
+        }
+    }
+
+    @Test func phraseRejectsWrongOrEmpty() {
+        for typed in ["I am awak", "", "   ", "I am not awake"] {
+            #expect(!WakePhrase.matches(typed, phrase: "I am awake"), "\(typed)")
+        }
+    }
+
+    @Test func blankPhraseFallsBackToStandard() {
+        #expect(WakePhrase.matches("i am awake", phrase: "  "))
+        #expect(!WakePhrase.matches("  ", phrase: ""))
+    }
+
+    @Test func isTypedAcceptsSmallAdditionsAndDeletions() {
+        #expect(WakePhrase.isTyped(old: "I a", new: "I am"))
+        #expect(WakePhrase.isTyped(old: "I a", new: "I am "))
+        #expect(WakePhrase.isTyped(old: "I am awake", new: ""))
+        #expect(!WakePhrase.isTyped(old: "I", new: "I am"))
+    }
+
+    // MARK: pending
+
+    @Test func pendingRoundTrips() {
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let now = date(2026, 10, 1, 7, 5)
+        let pending = WakePending(firstRing: date(2026, 10, 1, 7, 0), reRingID: UUID(), stoppedAt: now)
+        pending.save(defaults)
+        #expect(WakePending.current(defaults, now: now) == pending)
+    }
+
+    @Test func expiredPendingIsNil() {
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let now = date(2026, 10, 1, 8, 6)
+        WakePending(firstRing: date(2026, 10, 1, 7, 0), reRingID: UUID(), stoppedAt: now.addingTimeInterval(-61 * 60)).save(defaults)
+        #expect(WakePending.current(defaults, now: now) == nil)
+    }
+
+    @Test func clearedPendingIsNil() {
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let now = date(2026, 10, 1, 7, 5)
+        WakePending(firstRing: date(2026, 10, 1, 7, 0), reRingID: nil, stoppedAt: now).save(defaults)
+        WakePending.clear(defaults)
+        #expect(WakePending.current(defaults, now: now) == nil)
+    }
+
+    // MARK: flow
+
+    private func reRings(_ context: ModelContext) throws -> Int {
+        try context.fetch(FetchDescriptor<WakeLog>()).first?.reRings ?? 0
+    }
+
+    @Test func firstStopSchedulesReRingWithoutCounting() throws {
+        let store = try freshStore(); let context = store.context
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let firstRing = date(2026, 10, 1, 7, 0), now = date(2026, 10, 1, 7, 1)
+        let id = WakeFlow.stopped(alarmID: UUID(), firstRing: firstRing, now: now, context: context, defaults: defaults, calendar: calendar)
+        #expect(id != nil)
+        #expect(try reRings(context) == 0)
+        #expect(WakePending.current(defaults, now: now) == WakePending(firstRing: firstRing, reRingID: id, stoppedAt: now))
+    }
+
+    @Test func stoppingTheReRingCountsIt() throws {
+        let store = try freshStore(); let context = store.context
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let firstRing = date(2026, 10, 1, 7, 0), now = date(2026, 10, 1, 7, 1)
+        let first = WakeFlow.stopped(alarmID: UUID(), firstRing: firstRing, now: now, context: context, defaults: defaults, calendar: calendar)
+        let second = WakeFlow.stopped(alarmID: first, firstRing: firstRing, now: now, context: context, defaults: defaults, calendar: calendar)
+        #expect(try reRings(context) == 1)
+        #expect(second != nil && second != first)
+    }
+
+    @Test func stoppingAnUnrelatedAlarmDoesNotCount() throws {
+        let store = try freshStore(); let context = store.context
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let firstRing = date(2026, 10, 1, 7, 0), now = date(2026, 10, 1, 7, 1)
+        _ = WakeFlow.stopped(alarmID: UUID(), firstRing: firstRing, now: now, context: context, defaults: defaults, calendar: calendar)
+        _ = WakeFlow.stopped(alarmID: UUID(), firstRing: firstRing, now: now, context: context, defaults: defaults, calendar: calendar)
+        #expect(try reRings(context) == 0)
+    }
+
+    @Test func reRingsStopAtTheCap() throws {
+        let store = try freshStore(); let context = store.context
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let firstRing = date(2026, 10, 1, 7, 0), now = date(2026, 10, 1, 7, 1)
+        var id = WakeFlow.stopped(alarmID: UUID(), firstRing: firstRing, now: now, context: context, defaults: defaults, calendar: calendar)
+        for _ in 1..<WakeSchedule.maxReRings {
+            id = WakeFlow.stopped(alarmID: id, firstRing: firstRing, now: now, context: context, defaults: defaults, calendar: calendar)
+            #expect(id != nil)
+        }
+        let last = WakeFlow.stopped(alarmID: id, firstRing: firstRing, now: now, context: context, defaults: defaults, calendar: calendar)
+        #expect(last == nil)
+        #expect(try reRings(context) == WakeSchedule.maxReRings)
+        #expect(WakePending.current(defaults, now: now) == WakePending(firstRing: firstRing, reRingID: nil, stoppedAt: now))
+    }
+
+    @Test func wrongPhraseChangesNothing() throws {
+        let store = try freshStore(); let context = store.context
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let firstRing = date(2026, 10, 1, 7, 0), now = date(2026, 10, 1, 7, 1)
+        _ = WakeFlow.stopped(alarmID: UUID(), firstRing: firstRing, now: now, context: context, defaults: defaults, calendar: calendar)
+        let result = try WakeFlow.confirm("nope", phrase: "I am awake", now: now, context: context, defaults: defaults, calendar: calendar)
+        #expect(result == nil)
+        #expect(WakePending.current(defaults, now: now) != nil)
+        #expect(try context.fetch(FetchDescriptor<WakeLog>()).first?.outOfBed == nil)
+    }
+
+    @Test func rightPhraseLogsOutOfBedAndClearsPending() throws {
+        let store = try freshStore(); let context = store.context
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let firstRing = date(2026, 10, 1, 7, 0), stop = date(2026, 10, 1, 7, 1), now = date(2026, 10, 1, 7, 3)
+        let id = WakeFlow.stopped(alarmID: UUID(), firstRing: firstRing, now: stop, context: context, defaults: defaults, calendar: calendar)
+        let result = try WakeFlow.confirm("i am awake", phrase: "I am awake", now: now, context: context, defaults: defaults, calendar: calendar)
+        #expect(result?.reRingID == id)
+        #expect(try context.fetch(FetchDescriptor<WakeLog>()).first?.outOfBed == now)
+        #expect(WakePending.current(defaults, now: now) == nil)
+    }
+
+    @Test func confirmWithoutPendingDoesNothing() throws {
+        let store = try freshStore(); let context = store.context
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let now = date(2026, 10, 1, 7, 3)
+        #expect(try WakeFlow.confirm("I am awake", phrase: "I am awake", now: now, context: context, defaults: defaults, calendar: calendar) == nil)
+        #expect(try context.fetch(FetchDescriptor<WakeLog>()).isEmpty)
+    }
+
     #if os(iOS)
     // MARK: AlarmKit schedule
 

@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 #if os(iOS)
 import AlarmKit
+import UserNotifications
 #endif
 
 /// Wake-up alarms (iPhone) and the out-of-bed history (#132).
@@ -16,6 +17,7 @@ struct WakeUpView: View {
     @State private var editing: WakeAlarm?
     @State private var isAdding = false
     @State private var errorMessage: String?
+    @AppStorage(WakePhrase.key) private var phrase = WakePhrase.standard
     #endif
 
     private static var recentLogs: FetchDescriptor<WakeLog> {
@@ -27,8 +29,18 @@ struct WakeUpView: View {
     var body: some View {
         Form {
             #if os(iOS)
+            if WakePending.current() != nil {
+                Section { Button("Confirm you're up") { WakePrompt.shared.show() } }
+                    .listRowBackground(Color(theme.surface))
+            }
             if auth != .authorized { authorizationSection }
             alarmsSection
+            Section("Wake-up phrase") {
+                TextField(WakePhrase.standard, text: $phrase)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+            }
+            .listRowBackground(Color(theme.surface))
             #else
             Section { Text("Wake-up alarms ring on iPhone.").foregroundStyle(.secondary) }
                 .listRowBackground(Color(theme.surface))
@@ -43,6 +55,7 @@ struct WakeUpView: View {
                 Button("Add Alarm", systemImage: "plus") {
                     Task {
                         if auth == .notDetermined { await requestAuthorization() }
+                        _ = await LocalNotifications.authorized()
                         isAdding = true
                     }
                 }
@@ -91,7 +104,7 @@ struct WakeUpView: View {
         } header: {
             Text("Alarms")
         } footer: {
-            Text("“Still in bed” rings again every 5 minutes, up to 12 times. Tap Stop once you're out of bed.")
+            Text("Stop rings again in 5 minutes, up to 12 times, until you type your phrase in mise.")
         }
         .listRowBackground(Color(theme.surface))
     }
@@ -172,6 +185,41 @@ struct WakeUpView: View {
 }
 
 #if os(iOS)
+/// Full-screen prompt after Stop: typing the phrase logs out of bed and cancels the pending re-ring (#157).
+struct WakeConfirmView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage(WakePhrase.key) private var phrase = WakePhrase.standard
+    @State private var typed = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Text("Type “\(phrase)” to stop the next alarm.")
+                TextField("Phrase", text: Binding { typed } set: { if WakePhrase.isTyped(old: typed, new: $0) { typed = $0 } })
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .onSubmit(confirm)
+                Button("Confirm", action: confirm)
+            }
+            .navigationTitle("Confirm you're up")
+            .themedBackground()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Later") { dismiss() } }
+            }
+        }
+    }
+
+    private func confirm() {
+        guard let pending = try? WakeFlow.confirm(typed, phrase: phrase, now: .now, context: modelContext, defaults: .standard) else { return }
+        if let id = pending.reRingID { WakeAlarms.cancel(id) }
+        let center = UNUserNotificationCenter.current()
+        center.removeDeliveredNotifications(withIdentifiers: [WakePrompt.notificationID])
+        center.removePendingNotificationRequests(withIdentifiers: [WakePrompt.notificationID])
+        dismiss()
+    }
+}
+
 /// New or existing alarm: time and repeat days. Weekdays are required (no one-off alarms).
 private struct WakeAlarmEditor: View {
     let alarm: WakeAlarm?

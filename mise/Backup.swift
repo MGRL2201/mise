@@ -11,7 +11,7 @@ struct Backup: Codable {
     static let settingsKeys = ["theme.palette", "lock.mode", "lock.grace", "calendar.hidden", "calendar.colors", "calendar.default",
                                 "travel.transport", "travel.buffer", "planning.workStart", "planning.workEnd", "planning.workDays",
                                 "planning.daily", "planning.dailyTime",
-                                "planning.weekly", "planning.weeklyDay", "planning.weeklyTime"]
+                                "planning.weekly", "planning.weeklyDay", "planning.weeklyTime", "wake.phrase"]
 
     var version: Int
     var createdAt: Date

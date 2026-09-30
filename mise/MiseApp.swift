@@ -45,6 +45,7 @@ struct MiseApp: App {
                         #if os(iOS)
                         Self.recordSpikeLaunch()
                         Task { await WakeAlarms.sync((try? container.mainContext.fetch(FetchDescriptor<WakeAlarm>())) ?? []) }
+                        if WakePending.current() != nil { WakePrompt.shared.show() }
                         #endif
                     #if os(iOS)
                     case .background:
