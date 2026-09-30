@@ -66,6 +66,18 @@ struct WakeUpTests {
         #expect(fire >= date(2026, 3, 29, 0, 0))
     }
 
+    // MARK: firstRing
+
+    @Test func firstRingIsTodayForMorningAlarm() {
+        let fire = WakeSchedule.firstRing(hour: 6, minute: 30, now: date(2026, 10, 2, 6, 40), calendar: calendar)
+        #expect(fire == date(2026, 10, 2, 6, 30))
+    }
+
+    @Test func firstRingBeforeMidnightIsPreviousDay() {
+        let fire = WakeSchedule.firstRing(hour: 23, minute: 58, now: date(2026, 10, 2, 0, 5), calendar: calendar)
+        #expect(fire == date(2026, 10, 1, 23, 58))
+    }
+
     // MARK: averageOutOfBed
 
     @Test func averagesMinutesSinceMidnight() {

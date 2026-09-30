@@ -1,5 +1,10 @@
 import Foundation
 import SwiftData
+#if os(iOS)
+import AlarmKit
+import AppIntents
+import SwiftUI
+#endif
 
 /// A wake-up alarm (#132). `weekdays` uses Calendar weekday numbers
 /// (1 = Sunday ... 7 = Saturday); empty means one-off, ringing once at the
@@ -38,6 +43,14 @@ final class WakeLog {
 enum WakeSchedule {
     static let reRingDelay: TimeInterval = 5 * 60
     static let maxReRings = 12
+
+    /// When the alarm set for `hour:minute` first rang this morning: today, or
+    /// the day before if that is still ahead (an alarm set before midnight, re-ringing after).
+    static func firstRing(hour: Int, minute: Int, now: Date, calendar: Calendar) -> Date {
+        let today = calendar.date(bySettingHour: hour, minute: minute, second: 0, of: now) ?? now
+        guard today > now, let yesterday = calendar.date(byAdding: .day, value: -1, to: now) else { return today }
+        return calendar.date(bySettingHour: hour, minute: minute, second: 0, of: yesterday) ?? today
+    }
 
     /// Earliest date strictly after `after` at `hour:minute` whose weekday is
     /// in `weekdays` (any day if empty). DST-safe: asks Calendar for the next
@@ -91,3 +104,112 @@ extension WakeLog {
         return log
     }
 }
+
+#if os(iOS)
+nonisolated struct WakeMetadata: AlarmMetadata {}
+
+/// Mirrors `WakeAlarm`s into AlarmKit. Each on-alarm is a weekly `.relative`
+/// AlarmKit alarm with the same id; "Still in bed" re-rings are one-off `.fixed` alarms.
+enum WakeAlarms {
+    nonisolated static func configuration(alarmID: UUID, hour: Int, minute: Int, schedule: Alarm.Schedule) -> AlarmManager.AlarmConfiguration<WakeMetadata> {
+        let stillInBed = AlarmButton(text: "Still in bed", textColor: .white, systemImageName: "bed.double")
+        let alert: AlarmPresentation.Alert
+        if #available(iOS 26.1, *) {
+            alert = AlarmPresentation.Alert(title: "Stop when you're out of bed", secondaryButton: stillInBed, secondaryButtonBehavior: .custom)
+        } else {
+            alert = AlarmPresentation.Alert(title: "Stop when you're out of bed",
+                                            stopButton: AlarmButton(text: "I'm out of bed", textColor: .white, systemImageName: "figure.walk"),
+                                            secondaryButton: stillInBed, secondaryButtonBehavior: .custom)
+        }
+        let id = alarmID.uuidString
+        return .alarm(schedule: schedule,
+                      attributes: AlarmAttributes(presentation: AlarmPresentation(alert: alert), metadata: WakeMetadata(), tintColor: .accentColor),
+                      stopIntent: OutOfBedIntent(alarmID: id, hour: hour, minute: minute),
+                      secondaryIntent: StillInBedIntent(alarmID: id, hour: hour, minute: minute))
+    }
+
+    static func schedule(_ alarm: WakeAlarm) async throws {
+        cancel(alarm.id)
+        guard alarm.isOn else { return }
+        let days: [Locale.Weekday] = [.sunday, .monday, .tuesday, .wednesday, .thursday, .friday, .saturday]
+        let relative = Alarm.Schedule.Relative(time: .init(hour: alarm.hour, minute: alarm.minute),
+                                               repeats: .weekly(alarm.weekdays.map { days[$0 - 1] }))
+        _ = try await AlarmManager.shared.schedule(
+            id: alarm.id, configuration: configuration(alarmID: alarm.id, hour: alarm.hour, minute: alarm.minute, schedule: .relative(relative)))
+    }
+
+    static func cancel(_ id: UUID) {
+        try? AlarmManager.shared.cancel(id: id)
+    }
+
+    /// Schedules on-alarms AlarmKit lacks (e.g. after a backup restore) and cancels
+    /// weekly AlarmKit alarms with no on-alarm. Pending `.fixed` re-rings are left alone.
+    static func sync(_ alarms: [WakeAlarm]) async {
+        guard AlarmManager.shared.authorizationState == .authorized,
+              let scheduled = try? AlarmManager.shared.alarms else { return }
+        let on = alarms.filter(\.isOn)
+        let onIDs = Set(on.map(\.id))
+        let scheduledIDs = Set(scheduled.map(\.id))
+        for alarm in on where !scheduledIDs.contains(alarm.id) {
+            try? await schedule(alarm)
+        }
+        for alarm in scheduled where !onIDs.contains(alarm.id) {
+            if case .relative = alarm.schedule { cancel(alarm.id) }
+        }
+    }
+}
+
+/// Alarm stop button: logs the out-of-bed time for this morning.
+struct OutOfBedIntent: LiveActivityIntent {
+    static let title: LocalizedStringResource = "I'm Out of Bed"
+    static let isDiscoverable = false
+
+    @Parameter(title: "Alarm ID") var alarmID: String
+    @Parameter(title: "Hour") var hour: Int
+    @Parameter(title: "Minute") var minute: Int
+    @Dependency var container: ModelContainer
+
+    init() {}
+    nonisolated init(alarmID: String, hour: Int, minute: Int) {
+        self.alarmID = alarmID
+        self.hour = hour
+        self.minute = minute
+    }
+
+    @MainActor func perform() async throws -> some IntentResult {
+        let firstRing = WakeSchedule.firstRing(hour: hour, minute: minute, now: .now, calendar: .current)
+        try WakeLog.record(firstRing: firstRing, outOfBed: true, now: .now, context: container.mainContext)
+        return .result()
+    }
+}
+
+/// Alarm secondary button: counts a re-ring and rings again in 5 minutes, up to the cap.
+struct StillInBedIntent: LiveActivityIntent {
+    static let title: LocalizedStringResource = "Still in Bed"
+    static let isDiscoverable = false
+
+    @Parameter(title: "Alarm ID") var alarmID: String
+    @Parameter(title: "Hour") var hour: Int
+    @Parameter(title: "Minute") var minute: Int
+    @Dependency var container: ModelContainer
+
+    init() {}
+    nonisolated init(alarmID: String, hour: Int, minute: Int) {
+        self.alarmID = alarmID
+        self.hour = hour
+        self.minute = minute
+    }
+
+    @MainActor func perform() async throws -> some IntentResult {
+        if let id = UUID(uuidString: alarmID) { try? AlarmManager.shared.stop(id: id) }
+        let firstRing = WakeSchedule.firstRing(hour: hour, minute: minute, now: .now, calendar: .current)
+        let log = try WakeLog.record(firstRing: firstRing, outOfBed: false, now: .now, context: container.mainContext)
+        if log.reRings <= WakeSchedule.maxReRings {
+            let id = UUID()  // same hour:minute, so every ring of this morning lands in one log
+            _ = try await AlarmManager.shared.schedule(id: id, configuration: WakeAlarms.configuration(
+                alarmID: id, hour: hour, minute: minute, schedule: .fixed(.now + WakeSchedule.reRingDelay)))
+        }
+        return .result()
+    }
+}
+#endif
