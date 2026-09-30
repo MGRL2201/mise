@@ -42,6 +42,9 @@ final class Category {
     var icon: String = "tag"
     /// 0xRRGGBB; UI reads it as `Color.Resolved(UInt32(color))` (Theme.swift).
     var color: Int = 0
+    var sortOrder: Int = 0
+    /// Monthly budget in the home currency; nil = no budget.
+    var budget: Decimal?
     @Relationship(deleteRule: .nullify, inverse: \Transaction.category) var transactions: [Transaction]? = []
 
     init(name: String, icon: String = "tag", color: Int = 0) {

@@ -171,6 +171,8 @@ extension BackupTests {
         account.archived = true
         let debit = Account(name: "Debit", type: .debit, currency: "SGD")
         let category = mise.Category(name: "Food", icon: "fork.knife", color: 0xFF8800)
+        category.sortOrder = 3
+        category.budget = Decimal(string: "450.50")!
         let transaction = mise.Transaction(amount: Decimal(string: "-40.33")!, currency: "SGD", date: Date(timeIntervalSince1970: 1000))
         transaction.merchant = "Hawker"
         transaction.notes = "lunch"
@@ -205,6 +207,7 @@ extension BackupTests {
         let categories = try target.context.fetch(FetchDescriptor<mise.Category>())
         #expect(categories.map(\.name) == ["Food"])
         #expect(categories.first?.id == category.id && categories.first?.icon == "fork.knife" && categories.first?.color == 0xFF8800)
+        #expect(categories.first?.sortOrder == 3 && categories.first?.budget == Decimal(string: "450.50"))
         let copy = try #require(try target.context.fetch(FetchDescriptor<mise.Transaction>()).first)
         #expect(copy.id == transaction.id && copy.amount == Decimal(string: "-40.33") && copy.currency == "SGD" && copy.date == transaction.date)
         #expect(copy.merchant == "Hawker" && copy.notes == "lunch" && copy.categoryIsAuto)
