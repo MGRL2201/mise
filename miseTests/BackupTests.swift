@@ -213,7 +213,7 @@ extension BackupTests {
         #expect(transferCopy.id == transfer.id && transferCopy.amount == 40 && transferCopy.toAmount == 40)
         #expect(transferCopy.date == transfer.date && transferCopy.notes == "pay card")
         #expect(transferCopy.from?.id == debit.id && transferCopy.to === card)
-        #expect(Finance.balance(of: card) == Decimal(string: "19.66"))
+        #expect(Finance.balance(of: card, rates: FXRates()) == Decimal(string: "19.66"))
     }
 
     @Test func backupWithoutFinanceLeavesAccountsAlone() throws {

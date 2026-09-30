@@ -104,19 +104,51 @@ final class Transfer {
 enum Finance {
     /// Opening balance + own-currency transactions − transfers out + transfers in.
     /// Credit accounts go negative when owed.
-    static func balance(of account: Account) -> Decimal {
-        // ponytail: transactions in another currency than the account are skipped until #34/#36 decide how foreign charges convert to account currency.
-        let transactions = (account.transactions ?? []).filter { $0.currency == account.currency }.reduce(Decimal(0)) { $0 + $1.amount }
+    /// Foreign-currency transactions convert at the FX rate of their date; #36 should
+    /// store the account-currency amount charged at entry and use it instead.
+    // ponytail: no per-transaction converted amount cached yet; see #36.
+    static func balance(of account: Account, rates: FXRates = .load()) -> Decimal {
+        let transactions = (account.transactions ?? []).reduce(Decimal(0)) { total, transaction in
+            if transaction.currency == account.currency { return total + transaction.amount }
+            guard let converted = FX.convert(
+                transaction.amount, from: transaction.currency, to: account.currency,
+                rates: rates.rates(on: FXRates.day(transaction.date)) ?? [:]
+            ) else { return total }
+            return total + converted
+        }
         let outgoing = (account.outgoingTransfers ?? []).reduce(Decimal(0)) { $0 + $1.amount }
         let incoming = (account.incomingTransfers ?? []).reduce(Decimal(0)) { $0 + $1.toAmount }
         return account.openingBalance + transactions - outgoing + incoming
     }
 
+    private static func outflows(_ transactions: [Transaction], in range: DateInterval) -> [Transaction] {
+        transactions.filter { $0.amount < 0 && range.start <= $0.date && $0.date < range.end }
+    }
+
     /// Outflows in `range` (half-open: start <= date < end), as positive totals per currency code.
     // ponytail: refunds don't reduce spend; net them out if budgets need it.
     static func spend(_ transactions: [Transaction], in range: DateInterval) -> [String: Decimal] {
-        transactions
-            .filter { $0.amount < 0 && range.start <= $0.date && $0.date < range.end }
-            .reduce(into: [:]) { $0[$1.currency, default: 0] -= $1.amount }
+        outflows(transactions, in: range).reduce(into: [:]) { $0[$1.currency, default: 0] -= $1.amount }
+    }
+
+    /// Spend in home currency; currencies without any rate are returned separately so UI can show them.
+    static func homeSpend(
+        _ transactions: [Transaction], in range: DateInterval, rates: FXRates, home: String
+    ) -> (total: Decimal, unconverted: [String: Decimal]) {
+        var total = Decimal(0)
+        var unconverted: [String: Decimal] = [:]
+        for transaction in outflows(transactions, in: range) {
+            if let homeAmount = transaction.homeAmount {
+                total -= homeAmount
+            } else if let converted = FX.convert(
+                transaction.amount, from: transaction.currency, to: home,
+                rates: rates.rates(on: FXRates.day(transaction.date)) ?? [:]
+            ) {
+                total -= converted
+            } else {
+                unconverted[transaction.currency, default: 0] -= transaction.amount
+            }
+        }
+        return (total, unconverted)
     }
 }
