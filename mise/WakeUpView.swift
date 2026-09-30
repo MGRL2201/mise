@@ -242,7 +242,7 @@ private struct WakeAlarmEditor: View {
         target.hour = parts.hour ?? 7
         target.minute = parts.minute ?? 0
         target.weekdays = weekdays.sorted()
-        target.isOn = true
+        if alarm == nil { target.isOn = true } // new alarm defaults on; editing keeps the user's on/off choice
         try? modelContext.save()
         do {
             try await WakeAlarms.schedule(target)

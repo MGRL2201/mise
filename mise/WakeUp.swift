@@ -159,10 +159,15 @@ enum WakeAlarms {
               let scheduled = try? AlarmManager.shared.alarms else { return }
         let on = alarms.filter(\.isOn)
         let onIDs = Set(on.map(\.id))
-        for alarm in on where scheduled.first(where: { $0.id == alarm.id })?.schedule != schedule(for: alarm) {
-            try? await schedule(alarm)
+        // Only touch AlarmKit alarms still .scheduled: reschedule/cancel would kill an alarm
+        // that's currently ringing (.alerting) or mid-snooze (.countdown/.paused).
+        for alarm in on {
+            let match = scheduled.first(where: { $0.id == alarm.id })
+            if match == nil || (match?.state == .scheduled && match?.schedule != schedule(for: alarm)) {
+                try? await schedule(alarm)
+            }
         }
-        for alarm in scheduled where !onIDs.contains(alarm.id) {
+        for alarm in scheduled where !onIDs.contains(alarm.id) && alarm.state == .scheduled {
             if case .relative = alarm.schedule { cancel(alarm.id) }
         }
     }
