@@ -23,6 +23,8 @@ struct TransactionEditor: View {
     @State private var date: Date
     @State private var merchant: String
     @State private var category: Category?
+    @State private var categoryIsAuto: Bool
+    @State private var picked = false  // user chose a category in this editor session
     @State private var newCategory = ""
     @State private var notes: String
     @State private var confirmingDelete = false
@@ -38,6 +40,7 @@ struct TransactionEditor: View {
         _date = State(initialValue: transaction?.date ?? .now)
         _merchant = State(initialValue: transaction?.merchant ?? "")
         _category = State(initialValue: transaction?.category)
+        _categoryIsAuto = State(initialValue: transaction?.categoryIsAuto ?? false)
         _notes = State(initialValue: transaction?.notes ?? "")
     }
 
@@ -88,7 +91,11 @@ struct TransactionEditor: View {
                     }
                 }
                 Section {
-                    Picker("Category", selection: $category) {
+                    Picker("Category", selection: Binding(get: { category }, set: {
+                        category = $0
+                        picked = true
+                        categoryIsAuto = false
+                    })) {
                         Text("None").tag(Category?.none)
                         ForEach(Budgets.ordered(categories), id: \.self) {
                             Text($0.name).tag(Optional($0))
@@ -99,6 +106,10 @@ struct TransactionEditor: View {
                             .onSubmit(addCategory)
                         Button("Add", action: addCategory)
                             .disabled(newCategory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                } footer: {
+                    if categoryIsAuto && category != nil {
+                        Label("Suggested automatically — pick another to correct it.", systemImage: "sparkles")
                     }
                 }
                 Section {
@@ -126,6 +137,7 @@ struct TransactionEditor: View {
                         .disabled(amountValue == nil || chargedValue == nil || account == nil)
                 }
             }
+            .task(id: merchant) { await prefillCategory() }
             .onAppear {
                 if account == nil && transaction == nil { account = choices(accounts, keeping: []).first }
             }
@@ -151,6 +163,30 @@ struct TransactionEditor: View {
             category = created
         }
         newCategory = ""
+        picked = true
+        categoryIsAuto = false
+    }
+
+    private var canPrefill: Bool { !picked && (category == nil || categoryIsAuto) }
+
+    /// Rule instantly, else the model after a typing pause; never overrides a user pick.
+    private func prefillCategory() async {
+        guard canPrefill else { return }
+        guard !merchant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            if categoryIsAuto { category = nil; categoryIsAuto = false }
+            return
+        }
+        if let rule = Categorizer.rule(for: merchant, in: categories) {
+            category = rule
+            categoryIsAuto = true
+            return
+        }
+        try? await Task.sleep(for: .milliseconds(600))
+        guard !Task.isCancelled else { return }
+        let result = await Categorizer.suggest(merchant: merchant, amount: amountValue ?? 0, categories: categories)
+        guard !Task.isCancelled, canPrefill else { return }
+        category = result
+        categoryIsAuto = result != nil
     }
 
     private func save() {
@@ -163,8 +199,9 @@ struct TransactionEditor: View {
         target.merchant = merchant.trimmingCharacters(in: .whitespacesAndNewlines)
         target.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         target.account = account
-        if target.category != category { target.categoryIsAuto = false }
         target.category = category
+        target.categoryIsAuto = categoryIsAuto && category != nil
+        if picked && !target.merchant.isEmpty { Categorizer.learn(target.merchant, category: category) }
         // Also clears a stale charge when the account or currency changed.
         target.accountAmount = chargedValue == 0 ? nil : TransactionEntry.signed(chargedValue, income: income)
         target.homeAmount = nil // FX.refresh refills it for the new amount/currency/date.

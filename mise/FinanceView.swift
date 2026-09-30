@@ -382,7 +382,13 @@ struct TransactionRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(transaction.merchant.isEmpty ? "Transaction" : transaction.merchant)
                     if let category = transaction.category {
-                        Text(category.name).font(.subheadline).foregroundStyle(.secondary)
+                        HStack(spacing: 4) {
+                            Text(category.name)
+                            if transaction.categoryIsAuto {
+                                Image(systemName: "sparkles").font(.caption).accessibilityLabel("Auto")
+                            }
+                        }
+                        .font(.subheadline).foregroundStyle(.secondary)
                     }
                 }
                 Spacer()
