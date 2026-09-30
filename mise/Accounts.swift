@@ -71,10 +71,15 @@ extension Accounts {
         _ = account("IBKR", .brokerage, "USD", 12_000)
         account("Old POSB", .debit, "SGD", 0).archived = true
 
-        let groceries = Category(name: "Groceries", icon: "cart", color: 1)
-        let transport = Category(name: "Transport", icon: "car", color: 2)
-        let income = Category(name: "Income", icon: "banknote", color: 3)
-        let dining = Category(name: "Dining", icon: "fork.knife", color: 4)
+        let groceries = Category(name: "Groceries", icon: "cart", color: 0x34C759)
+        let transport = Category(name: "Transport", icon: "car", color: 0x007AFF)
+        let income = Category(name: "Income", icon: "banknote", color: 0x30B0C7)
+        let dining = Category(name: "Dining", icon: "fork.knife", color: 0xFF9500)
+        // Screenshot budgets vs the rows below: groceries ~83% orange, transport >100% red, dining green.
+        for (index, (category, budget)) in [(groceries, 180), (transport, 50), (income, nil), (dining, 100)].enumerated() {
+            category.sortOrder = index
+            category.budget = budget.map { Decimal($0) }
+        }
         let day: TimeInterval = 86_400
         let rows: [(String, String, Category, TimeInterval)] = [
             ("Salary", "5200", income, 2 * day + 3_600),

@@ -14,6 +14,7 @@ struct FinanceView: View {
     #if DEBUG
     @State private var debugOpened = false
     @State private var showingAll = false
+    @State private var showingBudgets = false
     #endif
     @AppStorage(FX.homeKey) private var home = FX.home()
     @AppStorage("finance.homeConfirmed") private var confirmed = false
@@ -48,6 +49,7 @@ struct FinanceView: View {
         }
         #if DEBUG
         .navigationDestination(isPresented: $showingAll) { AllTransactionsView() }
+        .navigationDestination(isPresented: $showingBudgets) { BudgetsView() }
         #endif
         .sheet(isPresented: $isAdding) { AccountEditor(account: nil) }
         .sheet(isPresented: $newTransaction) { TransactionEditor(transaction: nil) }
@@ -56,19 +58,21 @@ struct FinanceView: View {
         .onAppear {
             if accounts.isEmpty && !confirmed { askHome = true }
             #if DEBUG
-            // Screenshot hook: `-miseMoney transaction|transfer|all`, once per launch.
+            // Screenshot hook: `-miseMoney transaction|transfer|all|budgets`, once per launch.
             if !debugOpened {
                 debugOpened = true
                 switch UserDefaults.standard.string(forKey: "miseMoney") {
                 case "transaction": newTransaction = true
                 case "transfer": newTransfer = true
                 case "all": showingAll = true
+                case "budgets": showingBudgets = true
                 default: break
                 }
             }
             #endif
         }
         .task {
+            if !Storage.inMemory { Budgets.addStarterCategories(context: modelContext) }
             rates = .load()
             await FX.refresh(context: modelContext)
             rates = .load()
@@ -92,6 +96,7 @@ struct FinanceView: View {
             .listRowBackground(Color(theme.surface))
             Section {
                 NavigationLink("All Transactions") { AllTransactionsView() }
+                NavigationLink("Budgets") { BudgetsView() }
             }
             .listRowBackground(Color(theme.surface))
             ForEach(Accounts.grouped(accounts), id: \.type) { group in
