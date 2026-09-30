@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import SwiftUI
 @testable import mise
 
 @MainActor
@@ -20,6 +21,25 @@ struct AppLockTests {
 
     @Test func zeroGraceRelocksImmediately() {
         #expect(AppLock.shouldRelock(backgroundedAt: now, now: now, grace: 0))
+    }
+
+    @Test func coverState() {
+        #if os(macOS)
+        let snapshotCover = false  // no app-switcher snapshot on macOS
+        #else
+        let snapshotCover = true
+        #endif
+        let locked = AppLock.cover(mode: .wholeApp, isUnlocked: false, phase: .active, returning: false)
+        #expect(locked.locked && !locked.privacy)
+        let unlocked = AppLock.cover(mode: .wholeApp, isUnlocked: true, phase: .active, returning: false)
+        #expect(!unlocked.locked && !unlocked.privacy)
+        let finance = AppLock.cover(mode: .financeAndNotes, isUnlocked: false, phase: .inactive, returning: false)
+        #expect(!finance.locked && finance.privacy == snapshotCover)
+        // Back to active but the relock check hasn't run yet: stay covered.
+        let returning = AppLock.cover(mode: .wholeApp, isUnlocked: true, phase: .active, returning: true)
+        #expect(!returning.locked && returning.privacy == snapshotCover)
+        let off = AppLock.cover(mode: .off, isUnlocked: true, phase: .background, returning: true)
+        #expect(!off.locked && !off.privacy)
     }
 
     @Test func settingsPersistAndLaunchLockedWhenOn() {
