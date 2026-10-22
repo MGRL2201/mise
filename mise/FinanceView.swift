@@ -6,7 +6,9 @@ struct FinanceView: View {
     @Environment(\.theme) private var theme
     @Environment(\.modelContext) private var modelContext
     @Query private var accounts: [Account]
+    @Query private var transactions: [Transaction]
     @State private var rates = FXRates()
+    @State private var month = Calendar.current.dateInterval(of: .month, for: .now)!.start
     @State private var isAdding = false
     @State private var newTransaction = false
     @State private var newTransfer = false
@@ -17,6 +19,7 @@ struct FinanceView: View {
     @State private var showingAll = false
     @State private var showingBudgets = false
     @State private var showingBills = false
+    @State private var showingGoals = false
     @State private var showingUncategorized = false
     #if os(iOS)
     @State private var showingApplePay = false
@@ -57,6 +60,7 @@ struct FinanceView: View {
         .navigationDestination(isPresented: $showingAll) { AllTransactionsView() }
         .navigationDestination(isPresented: $showingBudgets) { BudgetsView() }
         .navigationDestination(isPresented: $showingBills) { BillsView() }
+        .navigationDestination(isPresented: $showingGoals) { GoalsView() }
         .navigationDestination(isPresented: $showingUncategorized) { UncategorizedView() }
         #if os(iOS)
         .navigationDestination(isPresented: $showingApplePay) { ApplePaySettingsView() }
@@ -71,7 +75,7 @@ struct FinanceView: View {
         .onAppear {
             if accounts.isEmpty && !confirmed { askHome = true }
             #if DEBUG
-            // Screenshot hook: `-miseMoney transaction|transfer|all|budgets|bills|uncategorized|applepay`, once per launch.
+            // Screenshot hook: `-miseMoney transaction|transfer|all|budgets|bills|goals|uncategorized|applepay`, once per launch.
             if !debugOpened {
                 debugOpened = true
                 switch UserDefaults.standard.string(forKey: "miseMoney") {
@@ -80,6 +84,7 @@ struct FinanceView: View {
                 case "all": showingAll = true
                 case "budgets": showingBudgets = true
                 case "bills": showingBills = true
+                case "goals": showingGoals = true
                 case "uncategorized": showingUncategorized = true
                 #if os(iOS)
                 case "applepay": showingApplePay = true
@@ -90,7 +95,10 @@ struct FinanceView: View {
             #endif
         }
         .task {
-            if !Storage.inMemory { Budgets.addStarterCategories(context: modelContext) }
+            if !Storage.inMemory {
+                Budgets.addStarterCategories(context: modelContext)  // first: it only seeds an empty store
+                Budgets.addStarterIncome(context: modelContext)
+            }
             rates = .load()
             await FX.refresh(context: modelContext)
             rates = .load()
@@ -104,6 +112,11 @@ struct FinanceView: View {
             accounts.map { (amount: Finance.balance(of: $0, rates: rates), currency: $0.currency) },
             rates: rates, home: home
         )
+        let interval = Calendar.current.dateInterval(of: .month, for: month)!
+        let income = Finance.homeIncome(transactions, in: interval, rates: rates, home: home)
+        let spend = Finance.homeSpend(transactions, in: interval, rates: rates, home: home)
+        let net = income.total - spend.total
+        let unconverted = income.unconverted.merging(spend.unconverted.mapValues { -$0 }, uniquingKeysWith: +)
         return Form {
             Section("Net worth") {
                 Text(worth.total, format: .currency(code: home)).font(.title2)
@@ -112,10 +125,25 @@ struct FinanceView: View {
                 }
             }
             .listRowBackground(Color(theme.surface))
+            Section("Income & spend") {
+                MonthSwitcher(month: $month)
+                LabeledContent("Income") {
+                    Text(income.total, format: .currency(code: home)).foregroundStyle(.green)
+                }
+                LabeledContent("Spend", value: spend.total, format: .currency(code: home))
+                LabeledContent("Net") {
+                    Text(net, format: .currency(code: home)).foregroundStyle(net < 0 ? .red : .primary)
+                }
+                ForEach(unconverted.filter { $0.value != 0 }.sorted { $0.key < $1.key }, id: \.key) { code, amount in
+                    Text("\(amount.formatted(.currency(code: code))) (no rate)").foregroundStyle(.secondary)
+                }
+            }
+            .listRowBackground(Color(theme.surface))
             Section {
                 NavigationLink("All Transactions") { AllTransactionsView() }
                 NavigationLink("Budgets") { BudgetsView() }
                 NavigationLink("Bills") { BillsView() }
+                NavigationLink("Goals") { GoalsView() }
                 #if os(iOS)  // Shortcuts Transaction automations are iPhone-only; settings live in local UserDefaults
                 NavigationLink("Apple Pay") { ApplePaySettingsView() }
                 #endif
@@ -235,7 +263,7 @@ struct AccountEditor: View {
                         ForEach(AccountType.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
                     }
                     CurrencyPicker(title: "Currency", selection: $currency)
-                        .disabled(live != nil && !canDelete)
+                        .disabled(live != nil && (!canDelete || !(live?.goals ?? []).isEmpty))
                     TextField("Opening balance", text: $opening)
                         #if os(iOS)
                         .keyboardType(.numbersAndPunctuation)

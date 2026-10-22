@@ -30,16 +30,17 @@ enum Categorizer {
         defaults.dictionary(forKey: rulesKey) as? [String: String] ?? [:]
     }
 
-    /// Rule category for this merchant among `categories` (stale ids resolve to nil).
+    /// Rule category for this merchant among `categories` (stale ids and income categories resolve to nil).
     static func rule(for merchant: String, in categories: [Category], defaults: UserDefaults = .standard) -> Category? {
         guard let id = rules(defaults)[normalize(merchant)] else { return nil }
-        return categories.first { $0.id.uuidString == id }
+        return categories.first { !$0.isIncome && $0.id.uuidString == id }
     }
 
-    /// Record the user's choice. nil category removes the rule. Empty normalized merchant = no-op.
+    /// Record the user's choice. nil category removes the rule. Empty normalized merchant or an income
+    /// category = no-op (rules are spending-only; an income pick must not clobber the spending rule).
     static func learn(_ merchant: String, category: Category?, defaults: UserDefaults = .standard) {
         let key = normalize(merchant)
-        guard !Storage.inMemory, !key.isEmpty else { return }  // seeded sample data must never write real rules
+        guard !Storage.inMemory, !key.isEmpty, category?.isIncome != true else { return }  // seeded sample data must never write real rules
         var rules = rules(defaults)
         rules[key] = category?.id.uuidString
         defaults.set(rules, forKey: rulesKey)
@@ -51,6 +52,7 @@ enum Categorizer {
     static func suggest(merchant: String, amount: Decimal, categories: [Category],
                         defaults: UserDefaults = .standard,
                         modelAvailable: Bool = OnDeviceAI.unavailableReason == nil) async -> Category? {
+        let categories = categories.filter { !$0.isIncome }  // outflow-only: income is never suggested
         if let rule = rule(for: merchant, in: categories, defaults: defaults) { return rule }
         let merchant = merchant.trimmingCharacters(in: .whitespacesAndNewlines)
         var names: [String] = []  // case-insensitive dedupe; "Uncategorized" only if no category has that name
@@ -72,14 +74,14 @@ enum Categorizer {
 
     /// Sets every uncategorized or auto-categorized transaction whose normalized merchant equals `merchant`'s to
     /// `category` (categoryIsAuto = false on those), saves, returns the count whose category changed.
-    /// Manual picks are left untouched. Blank merchant = no-op.
+    /// Manual picks and inflows are left untouched. Blank merchant = no-op.
     @MainActor
     static func applyToAll(merchant: String, category: Category?, context: ModelContext) -> Int {
         let key = normalize(merchant)
         guard !key.isEmpty else { return 0 }
         // ponytail: fetches every transaction and normalizes in memory; add a stored normalized column if this gets slow.
         let matches = ((try? context.fetch(FetchDescriptor<Transaction>())) ?? [])
-            .filter { ($0.category == nil || $0.categoryIsAuto) && normalize($0.merchant) == key }
+            .filter { isReassignable($0, key: key) }
         var changed = 0
         for transaction in matches {
             transaction.categoryIsAuto = false
@@ -90,5 +92,11 @@ enum Categorizer {
         }
         try? context.save()
         return changed
+    }
+
+    /// Outflow, uncategorized or auto-categorized, normalized merchant == `key`: what applyToAll may change.
+    static func isReassignable(_ transaction: Transaction, key: String) -> Bool {
+        transaction.amount < 0 && (transaction.category == nil || transaction.categoryIsAuto)
+            && normalize(transaction.merchant) == key
     }
 }

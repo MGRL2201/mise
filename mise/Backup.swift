@@ -31,6 +31,8 @@ struct Backup: Codable {
     var transfers: [TransferRecord]?
     /// Optional: files before #38 lack them.
     var bills: [BillRecord]?
+    /// Optional: files before #39 lack them.
+    var goals: [GoalRecord]?
 
     struct AccountRecord: Codable {
         var id: UUID
@@ -50,6 +52,8 @@ struct Backup: Codable {
         /// Optional: files before #37 lack them.
         var sortOrder: Int?
         var budget: Decimal?
+        /// Optional: files before #39 lack it.
+        var isIncome: Bool?
     }
 
     struct TransactionRecord: Codable {
@@ -91,6 +95,17 @@ struct Backup: Codable {
         var anchorDay: Int
         var remindDays: Int
         var active: Bool
+        var createdAt: Date
+    }
+
+    struct GoalRecord: Codable {
+        var id: UUID
+        var name: String
+        var target: Decimal
+        var currency: String
+        var targetDate: Date?
+        var accountID: UUID?
+        var contributions: [GoalContribution]
         var createdAt: Date
     }
 
@@ -165,7 +180,7 @@ enum BackupService {
         }
         let categories = try context.fetch(FetchDescriptor<Category>()).map {
             Backup.CategoryRecord(id: $0.id, name: $0.name, icon: $0.icon, color: $0.color,
-                                  sortOrder: $0.sortOrder, budget: $0.budget)
+                                  sortOrder: $0.sortOrder, budget: $0.budget, isIncome: $0.isIncome)
         }
         let transactions = try context.fetch(FetchDescriptor<Transaction>()).map {
             Backup.TransactionRecord(id: $0.id, amount: $0.amount, currency: $0.currency, date: $0.date,
@@ -184,6 +199,11 @@ enum BackupService {
                               interval: $0.interval, nextDue: $0.nextDue, anchorDay: $0.anchorDay,
                               remindDays: $0.remindDays, active: $0.active, createdAt: $0.createdAt)
         }
+        let goals = try context.fetch(FetchDescriptor<Goal>()).map {
+            Backup.GoalRecord(id: $0.id, name: $0.name, target: $0.target, currency: $0.currency,
+                              targetDate: $0.targetDate, accountID: $0.account?.id,
+                              contributions: $0.contributions, createdAt: $0.createdAt)
+        }
         var settings: [String: Any] = [:]
         for key in Backup.settingsKeys { settings[key] = defaults.object(forKey: key) }
         return try JSONEncoder().encode(Backup(
@@ -191,7 +211,7 @@ enum BackupService {
             settings: PropertyListSerialization.data(fromPropertyList: settings, format: .binary, options: 0),
             tags: tags, taskExtras: taskExtras, wakeAlarms: wakeAlarms, wakeLogs: wakeLogs,
             accounts: accounts, categories: categories, transactions: transactions, transfers: transfers,
-            bills: bills))
+            bills: bills, goals: goals))
     }
 
     static func restore(_ data: Data, context: ModelContext, files: AttachmentFileStore, defaults: UserDefaults) throws {
@@ -261,6 +281,7 @@ enum BackupService {
                 try context.fetch(FetchDescriptor<Transaction>()).forEach(context.delete)
                 try context.fetch(FetchDescriptor<Transfer>()).forEach(context.delete)
                 try context.fetch(FetchDescriptor<Bill>()).forEach(context.delete)
+                try context.fetch(FetchDescriptor<Goal>()).forEach(context.delete)
                 try context.fetch(FetchDescriptor<Category>()).forEach(context.delete)
                 try context.fetch(FetchDescriptor<Account>()).forEach(context.delete)
                 var accounts: [UUID: Account] = [:]
@@ -279,6 +300,7 @@ enum BackupService {
                     category.id = record.id
                     category.sortOrder = record.sortOrder ?? 0
                     category.budget = record.budget
+                    category.isIncome = record.isIncome ?? false
                     context.insert(category)
                     categories[record.id] = category
                 }
@@ -317,6 +339,15 @@ enum BackupService {
                     context.insert(bill)
                     bill.account = record.accountID.flatMap { accounts[$0] }
                     bill.category = record.categoryID.flatMap { categories[$0] }
+                }
+                for record in backup.goals ?? [] {
+                    let goal = Goal(name: record.name, target: record.target, currency: record.currency)
+                    goal.id = record.id
+                    goal.targetDate = record.targetDate
+                    goal.contributions = record.contributions
+                    goal.createdAt = record.createdAt
+                    context.insert(goal)
+                    goal.account = record.accountID.flatMap { accounts[$0] }
                 }
             }
             try context.save()

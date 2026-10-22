@@ -112,6 +112,44 @@ struct BudgetsTests {
         #expect(defaults.bool(forKey: Budgets.starterKey))
     }
 
+    @Test func starterIncomeAddedOnceWithoutDuplicateNames() throws {
+        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let food = mise.Category(name: "Food")
+        food.sortOrder = 4
+        [food, mise.Category(name: " salary ")].forEach(context.insert)
+        try context.save()
+        Budgets.addStarterIncome(context: context, defaults: defaults)
+        let income = try context.fetch(FetchDescriptor<mise.Category>()).filter(\.isIncome)
+        #expect(income.map(\.name) == ["Other income"])
+        #expect(income.first?.sortOrder == 5)
+        #expect(defaults.bool(forKey: Budgets.incomeStarterKey))
+        income.forEach(context.delete)
+        try context.save()
+        Budgets.addStarterIncome(context: context, defaults: defaults)
+        #expect(try context.fetch(FetchDescriptor<mise.Category>()).filter(\.isIncome).isEmpty)
+    }
+
+    @Test func starterIncomeAddsBothForFreshInstall() throws {
+        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        Budgets.addStarterCategories(context: context, defaults: defaults)
+        Budgets.addStarterIncome(context: context, defaults: defaults)
+        let all = Budgets.ordered(try context.fetch(FetchDescriptor<mise.Category>()))
+        #expect(all.count == 12)
+        #expect(all.filter(\.isIncome).map(\.name) == ["Salary", "Other income"])
+        #expect(all.suffix(2).map(\.sortOrder) == [10, 11])
+    }
+
+    @Test func starterIncomeSkippedWhenIncomeCategoryExists() throws {
+        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        let wages = mise.Category(name: "Wages")
+        wages.isIncome = true
+        context.insert(wages)
+        try context.save()
+        Budgets.addStarterIncome(context: context, defaults: defaults)
+        #expect(try context.fetch(FetchDescriptor<mise.Category>()).map(\.name) == ["Wages"])
+        #expect(defaults.bool(forKey: Budgets.incomeStarterKey))
+    }
+
     @Test func orderedAndNamed() {
         let b = mise.Category(name: "b")
         let a2 = mise.Category(name: "a10")

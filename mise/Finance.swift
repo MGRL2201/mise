@@ -26,6 +26,7 @@ final class Account {
     @Relationship(deleteRule: .nullify, inverse: \Transfer.from) var outgoingTransfers: [Transfer]? = []
     @Relationship(deleteRule: .nullify, inverse: \Transfer.to) var incomingTransfers: [Transfer]? = []
     @Relationship(deleteRule: .nullify, inverse: \Bill.account) var bills: [Bill]? = []
+    @Relationship(deleteRule: .nullify, inverse: \Goal.account) var goals: [Goal]? = []
 
     init(name: String, type: AccountType, currency: String, openingBalance: Decimal = 0) {
         self.name = name
@@ -46,6 +47,8 @@ final class Category {
     var sortOrder: Int = 0
     /// Monthly budget in the home currency; nil = no budget.
     var budget: Decimal?
+    /// Income categories are separate from spending: no budget, never auto-suggested.
+    var isIncome: Bool = false
     @Relationship(deleteRule: .nullify, inverse: \Transaction.category) var transactions: [Transaction]? = []
     @Relationship(deleteRule: .nullify, inverse: \Bill.category) var bills: [Bill]? = []
 
@@ -143,18 +146,36 @@ enum Finance {
     static func homeSpend(
         _ transactions: [Transaction], in range: DateInterval, rates: FXRates, home: String
     ) -> (total: Decimal, unconverted: [String: Decimal]) {
+        toHome(outflows(transactions, in: range), rates: rates, home: home, sign: -1)
+    }
+
+    /// Inflows in `range` that are uncategorized or in an income category, in home currency.
+    // ponytail: refunds (inflows in a spending category) count as neither income nor spend.
+    static func homeIncome(
+        _ transactions: [Transaction], in range: DateInterval, rates: FXRates, home: String
+    ) -> (total: Decimal, unconverted: [String: Decimal]) {
+        let inflows = transactions.filter {
+            $0.amount > 0 && $0.category?.isIncome != false && range.start <= $0.date && $0.date < range.end
+        }
+        return toHome(inflows, rates: rates, home: home, sign: 1)
+    }
+
+    /// Sums `sign * amount` in home currency: stored homeAmount, else the day's FX rate, else unconverted.
+    private static func toHome(
+        _ transactions: [Transaction], rates: FXRates, home: String, sign: Decimal
+    ) -> (total: Decimal, unconverted: [String: Decimal]) {
         var total = Decimal(0)
         var unconverted: [String: Decimal] = [:]
-        for transaction in outflows(transactions, in: range) {
+        for transaction in transactions {
             if let homeAmount = transaction.homeAmount {
-                total -= homeAmount
+                total += sign * homeAmount
             } else if let converted = FX.convert(
                 transaction.amount, from: transaction.currency, to: home,
                 rates: rates.rates(on: FXRates.day(transaction.date)) ?? [:]
             ) {
-                total -= converted
+                total += sign * converted
             } else {
-                unconverted[transaction.currency, default: 0] -= transaction.amount
+                unconverted[transaction.currency, default: 0] += sign * transaction.amount
             }
         }
         return (total, unconverted)

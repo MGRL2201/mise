@@ -34,6 +34,39 @@ struct CategorizerTests {
         #expect(Categorizer.rule(for: "Starbucks", in: categories, defaults: defaults) == nil)
     }
 
+    @Test func ruleIgnoresIncomeCategories() {
+        let salary = mise.Category(name: "Salary")
+        salary.isIncome = true
+        defaults.set(["acme": salary.id.uuidString], forKey: Categorizer.rulesKey)  // legacy income rule
+        #expect(Categorizer.rule(for: "ACME", in: [food, salary], defaults: defaults) == nil)
+        Categorizer.learn("ACME", category: food, defaults: defaults)
+        Categorizer.learn("ACME Corp", category: salary, defaults: defaults)  // income pick: no-op
+        #expect(Categorizer.rule(for: "ACME", in: [food, salary], defaults: defaults) === food)
+    }
+
+    @Test func isReassignable() {
+        func make(_ merchant: String, _ amount: Decimal) -> mise.Transaction {
+            let transaction = mise.Transaction(amount: amount, currency: "SGD", date: .now)
+            transaction.merchant = merchant
+            context.insert(transaction)
+            return transaction
+        }
+        let picked = make("Grab", -10)
+        picked.category = food
+        #expect(Categorizer.isReassignable(make("GRAB #1", -10), key: "grab"))
+        #expect(!Categorizer.isReassignable(make("Grab", 10), key: "grab"))  // inflow
+        #expect(!Categorizer.isReassignable(picked, key: "grab"))  // user pick
+        #expect(!Categorizer.isReassignable(make("FairPrice", -10), key: "grab"))
+    }
+
+    @Test func applyToAllSkipsInflows() {
+        let refund = mise.Transaction(amount: 10, currency: "SGD", date: .now)
+        refund.merchant = "Grab"
+        context.insert(refund)
+        #expect(Categorizer.applyToAll(merchant: "Grab", category: food, context: context) == 0)
+        #expect(refund.category == nil)
+    }
+
     @Test func suggestRuleWinsElseNilWithoutModel() async {
         Categorizer.learn("Starbucks", category: coffee, defaults: defaults)
         #expect(await Categorizer.suggest(merchant: "STARBUCKS #1", amount: -5, categories: [food, coffee],
