@@ -16,6 +16,9 @@ struct FinanceView: View {
     @State private var showingAll = false
     @State private var showingBudgets = false
     @State private var showingUncategorized = false
+    #if os(iOS)
+    @State private var showingApplePay = false
+    #endif
     #endif
     @AppStorage(FX.homeKey) private var home = FX.home()
     @AppStorage("finance.homeConfirmed") private var confirmed = false
@@ -52,6 +55,9 @@ struct FinanceView: View {
         .navigationDestination(isPresented: $showingAll) { AllTransactionsView() }
         .navigationDestination(isPresented: $showingBudgets) { BudgetsView() }
         .navigationDestination(isPresented: $showingUncategorized) { UncategorizedView() }
+        #if os(iOS)
+        .navigationDestination(isPresented: $showingApplePay) { ApplePaySettingsView() }
+        #endif
         #endif
         .sheet(isPresented: $isAdding) { AccountEditor(account: nil) }
         .sheet(isPresented: $newTransaction) { TransactionEditor(transaction: nil) }
@@ -60,7 +66,7 @@ struct FinanceView: View {
         .onAppear {
             if accounts.isEmpty && !confirmed { askHome = true }
             #if DEBUG
-            // Screenshot hook: `-miseMoney transaction|transfer|all|budgets|uncategorized`, once per launch.
+            // Screenshot hook: `-miseMoney transaction|transfer|all|budgets|uncategorized|applepay`, once per launch.
             if !debugOpened {
                 debugOpened = true
                 switch UserDefaults.standard.string(forKey: "miseMoney") {
@@ -69,6 +75,9 @@ struct FinanceView: View {
                 case "all": showingAll = true
                 case "budgets": showingBudgets = true
                 case "uncategorized": showingUncategorized = true
+                #if os(iOS)
+                case "applepay": showingApplePay = true
+                #endif
                 default: break
                 }
             }
@@ -100,6 +109,9 @@ struct FinanceView: View {
             Section {
                 NavigationLink("All Transactions") { AllTransactionsView() }
                 NavigationLink("Budgets") { BudgetsView() }
+                #if os(iOS)  // Shortcuts Transaction automations are iPhone-only; settings live in local UserDefaults
+                NavigationLink("Apple Pay") { ApplePaySettingsView() }
+                #endif
             }
             .listRowBackground(Color(theme.surface))
             ForEach(Accounts.grouped(accounts), id: \.type) { group in
