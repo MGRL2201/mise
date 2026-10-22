@@ -194,9 +194,17 @@ extension BackupTests {
         transaction.category = category
         transfer.from = debit
         transfer.to = account
+        let goal = Goal(name: "Trip", target: Decimal(string: "1200.50")!, currency: "SGD")
+        goal.targetDate = Date(timeIntervalSince1970: 3000)
+        goal.createdAt = Date(timeIntervalSince1970: 4000)
+        goal.contributions = [GoalContribution(amount: 100, date: Date(timeIntervalSince1970: 100)),
+                              GoalContribution(amount: Decimal(string: "-20.25")!, date: Date(timeIntervalSince1970: 200))]
+        source.context.insert(goal)
+        goal.account = debit
         try source.context.save()
 
         let target = try freshStore()
+        target.context.insert(Goal(name: "Stale", target: 1, currency: "USD"))
         target.context.insert(Account(name: "Stale", type: .cash, currency: "USD"))
         target.context.insert(mise.Category(name: "Stale", icon: "tag", color: 0))
         try target.context.save()
@@ -224,6 +232,12 @@ extension BackupTests {
         #expect(transferCopy.date == transfer.date && transferCopy.notes == "pay card")
         #expect(transferCopy.from?.id == debit.id && transferCopy.to === card)
         #expect(Finance.balance(of: card, rates: FXRates()) == Decimal(string: "19.66"))
+        let goals = try target.context.fetch(FetchDescriptor<Goal>())
+        let goalCopy = try #require(goals.first)
+        #expect(goals.count == 1)
+        #expect(goalCopy.id == goal.id && goalCopy.name == "Trip" && goalCopy.target == Decimal(string: "1200.50"))
+        #expect(goalCopy.currency == "SGD" && goalCopy.targetDate == goal.targetDate && goalCopy.createdAt == goal.createdAt)
+        #expect(goalCopy.contributions == goal.contributions && goalCopy.account?.id == debit.id)
     }
 
     @Test func billsRoundTripAndReplaceStale() throws {

@@ -153,12 +153,13 @@ struct FinanceTests {
         let all = [
             paid, refund, lunch, foreign,
             transaction(100, on: nil, at: start),
+            transaction(-40, on: nil, at: start),
             transaction(999, on: nil, at: range.end),
             transaction(50000, on: nil, currency: "VND", at: start),
         ]
         let income = Finance.homeIncome(all, in: range, rates: FXRates(), home: "SGD")
         #expect(income.total == 5230)
         #expect(income.unconverted == ["VND": 50000])
-        #expect(Finance.homeSpend(all, in: range, rates: FXRates(), home: "SGD").total == 300)
+        #expect(Finance.homeSpend(all, in: range, rates: FXRates(), home: "SGD").total == 340)
     }
 }

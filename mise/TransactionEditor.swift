@@ -108,10 +108,12 @@ struct TransactionEditor: View {
                         TextField("New category", text: $newCategory)
                             .onSubmit(addCategory)
                         Button("Add", action: addCategory)
-                            .disabled(newCategory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            .disabled(newCategory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || otherKind != nil)
                     }
                 } footer: {
-                    if categoryIsAuto && category != nil {
+                    if let otherKind {
+                        Text("\"\(otherKind.name)\" is \(otherKind.isIncome ? "an income" : "a spending") category")
+                    } else if categoryIsAuto && category != nil {
                         Label("Suggested automatically — pick another to correct it.", systemImage: "sparkles")
                     }
                 }
@@ -154,6 +156,11 @@ struct TransactionEditor: View {
                 if let new, currency == old?.currency || (old == nil && transaction == nil) { currency = new.currency }
             }
         }
+    }
+
+    /// Existing category of the other kind named like the typed one; names are unique across kinds.
+    private var otherKind: Category? {
+        Budgets.named(newCategory, in: categories).flatMap { $0.isIncome == income ? nil : $0 }
     }
 
     // ponytail: inserted immediately, so Cancel keeps a new category; rename/delete it in Categories.
