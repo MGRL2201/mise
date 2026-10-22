@@ -81,4 +81,41 @@ struct ApplePayTests {
         #expect(defaults.dictionary(forKey: ApplePay.cardsKey) as? [String: String] ==
                 ["Visa Signature": visa.id.uuidString, "Old Card": archived.id.uuidString, "New": "", "Amex": ""])
     }
+    @Test func log() async {
+        func log(_ raw: String, merchant: String = "Starbucks", date: Date = .now) async -> (dialog: String, saved: mise.Transaction?) {
+            await ApplePay.log(amount: raw, merchant: merchant, card: "Visa", date: date, context: context,
+                               defaults: defaults, modelAvailable: false)
+        }
+        func count() -> Int { (try? context.fetchCount(FetchDescriptor<mise.Transaction>())) ?? -1 }
+
+        let none = await log("S$12.50")
+        #expect(none.dialog == "Choose a default Apple Pay account in mise: Money → Apple Pay.")
+        #expect(none.saved == nil && count() == 0)
+
+        let card = Account(name: "Card", type: .credit, currency: "SGD")
+        let coffee = Category(name: "Coffee")
+        context.insert(card)
+        context.insert(coffee)
+        defaults.set(card.id.uuidString, forKey: ApplePay.defaultKey)
+        let date = Date.now
+        let first = await log("S$12.50", merchant: " Starbucks ", date: date)
+        #expect(first.dialog.hasPrefix("Logged"))
+        #expect(first.saved?.amount == Decimal(string: "-12.50") && first.saved?.currency == "SGD")
+        #expect(first.saved?.source == .applePay && first.saved?.account === card)
+        #expect(first.saved?.merchant == "Starbucks" && first.saved?.category == nil && first.saved?.categoryIsAuto == false)
+        #expect(count() == 1)
+
+        let again = await log("S$12.50", date: date.addingTimeInterval(60))
+        #expect(again.dialog.hasPrefix("Already logged") && again.saved == nil && count() == 1)
+
+        defaults.set([Categorizer.normalize("Starbucks"): coffee.id.uuidString], forKey: Categorizer.rulesKey)
+        let ruled = await log("S$4.20", date: date)
+        #expect(ruled.saved?.category === coffee && ruled.saved?.categoryIsAuto == true && count() == 2)
+
+        let garbage = await log("abc")
+        #expect(garbage.dialog == "Couldn't read the amount \"abc\"." && garbage.saved == nil && count() == 2)
+
+        let empty = await log("")
+        #expect(empty.dialog == "Couldn't read the amount \"\"." && empty.saved == nil && count() == 2)
+    }
 }

@@ -23,7 +23,7 @@ struct MiseApp: App {
         let container = Storage.makeContainer()
         #endif
         self.container = container
-        AppDependencyManager.shared.add(dependency: container)  // CompleteTaskIntent, alarm intents
+        AppDependencyManager.shared.add(dependency: container)  // CompleteTaskIntent, LogTransactionIntent, alarm intents
         let store = EKEventStore()  // one store per app (Apple guidance)
         _reminders = State(initialValue: RemindersStore(eventStore: store, context: container.mainContext))
         _calendar = State(initialValue: CalendarStore(eventStore: store))

@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 
 /// Apple Pay auto-import (#153) helpers: parse the Shortcuts Transaction amount, dedupe, map card -> account.
 enum ApplePay {
@@ -82,6 +83,47 @@ enum ApplePay {
               !cards.keys.contains(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) else { return }
         cards[name] = ""
         defaults.set(cards, forKey: cardsKey)
+    }
+}
+
+extension ApplePay {
+    /// Shortcuts Transaction automation entry point: map card, parse, dedupe, categorize, save. Dialog for Siri/Shortcuts.
+    @MainActor
+    static func log(amount raw: String, merchant: String, card: String, date: Date, context: ModelContext,
+                    defaults: UserDefaults = .standard,
+                    modelAvailable: Bool = OnDeviceAI.unavailableReason == nil) async -> (dialog: String, saved: Transaction?) {
+        remember(card: card, defaults: defaults)
+        let accounts = (try? context.fetch(FetchDescriptor<Account>())) ?? []
+        guard let account = account(forCard: card, in: accounts, defaults: defaults) else {
+            return ("Choose a default Apple Pay account in mise: Money → Apple Pay.", nil)
+        }
+        guard let parse = parseAmount(raw, fallback: account.currency) else {
+            return ("Couldn't read the amount \"\(raw)\".", nil)
+        }
+        let signed = -parse.amount  // Apple Pay taps are outflows
+        let merchant = merchant.trimmingCharacters(in: .whitespacesAndNewlines)
+        let label = parse.amount.formatted(.currency(code: parse.currency)) + (merchant.isEmpty ? "" : " at \(merchant)")
+        let (lo, hi) = (date.addingTimeInterval(-duplicateWindow), date.addingTimeInterval(duplicateWindow))
+        let nearby = (try? context.fetch(FetchDescriptor<Transaction>(predicate: #Predicate { $0.date >= lo && $0.date <= hi }))) ?? []
+        if isDuplicate(amount: signed, merchant: merchant, account: account, date: date, in: nearby) {
+            return ("Already logged \(label).", nil)
+        }
+        let transaction = Transaction(amount: signed, currency: parse.currency, date: date)
+        context.insert(transaction)
+        transaction.merchant = merchant
+        transaction.account = account
+        transaction.source = .applePay
+        // Save before the (possibly slow) model call so a background kill doesn't lose the purchase.
+        do { try context.save() } catch {
+            context.delete(transaction)
+            return ("Couldn't save the transaction. Open mise and try again.", nil)
+        }
+        let categories = (try? context.fetch(FetchDescriptor<Category>())) ?? []
+        transaction.category = await Categorizer.suggest(merchant: merchant, amount: signed, categories: categories,
+                                                         defaults: defaults, modelAvailable: modelAvailable)
+        transaction.categoryIsAuto = transaction.category != nil
+        try? context.save()  // failure keeps the saved uncategorized transaction
+        return ("Logged \(label).", transaction)
     }
 }
 
