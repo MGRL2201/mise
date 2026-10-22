@@ -20,6 +20,7 @@ struct CategorizerTests {
         #expect(Categorizer.normalize("McDonald's 00453") == "mcdonalds")
         #expect(Categorizer.normalize("  ") == "")
         #expect(Categorizer.normalize("Ltd") == "ltd")
+        #expect(Categorizer.normalize(" Pte   Ltd ") == "pte ltd")
     }
 
     @Test func learnThenRule() {
@@ -51,6 +52,10 @@ struct CategorizerTests {
             return transaction
         }
         transactions[4].category = food
+        let picked = mise.Transaction(amount: -10, currency: "SGD", date: .now)
+        picked.merchant = "Grab"
+        picked.category = coffee
+        context.insert(picked)
         #expect(Categorizer.applyToAll(merchant: "  ", category: coffee, context: context) == 0)
         #expect(transactions[3].category == nil && transactions[3].categoryIsAuto)
         #expect(Categorizer.applyToAll(merchant: "grab", category: food, context: context) == 2)
@@ -58,5 +63,16 @@ struct CategorizerTests {
         #expect(transactions[1].category === food && !transactions[1].categoryIsAuto)
         #expect(transactions[2].category == nil && transactions[2].categoryIsAuto)
         #expect(transactions[4].category === food && !transactions[4].categoryIsAuto)  // already food: flag cleared, not counted
+        #expect(picked.category === coffee && !picked.categoryIsAuto)  // user pick untouched
+    }
+
+    @Test func shouldPrefill() {
+        typealias E = TransactionEditor
+        #expect(E.shouldPrefill(picked: false, hasCategory: false, isAuto: false, merchant: "Grab", original: nil))
+        #expect(!E.shouldPrefill(picked: false, hasCategory: false, isAuto: false, merchant: "Grab", original: "Grab"))
+        #expect(!E.shouldPrefill(picked: false, hasCategory: true, isAuto: true, merchant: "Grab", original: "Grab"))
+        #expect(E.shouldPrefill(picked: false, hasCategory: true, isAuto: true, merchant: "Grab SG", original: "Grab"))
+        #expect(!E.shouldPrefill(picked: true, hasCategory: false, isAuto: false, merchant: "Grab", original: nil))
+        #expect(!E.shouldPrefill(picked: false, hasCategory: true, isAuto: false, merchant: "Grab SG", original: "Grab"))
     }
 }

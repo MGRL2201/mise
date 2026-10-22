@@ -14,7 +14,7 @@ enum Categorizer {
     /// Pure. Lowercase, diacritics folded; drop "#123"-style store numbers; delete . ' ’ - (so "7-Eleven" -> "7eleven",
     /// "McDonald's" -> "mcdonalds", "Pte. Ltd." -> "pte ltd"); other punctuation/symbols -> space ("GRAB*RIDE" -> "grab ride");
     /// drop all-digit tokens of 3+ digits; drop trailing company suffix and location tokens; collapse whitespace.
-    /// If the result would be empty, return the folded lowercased trimmed input.
+    /// If the result would be empty, return the folded lowercased input, trimmed and whitespace-collapsed.
     static func normalize(_ merchant: String) -> String {
         let folded = merchant.folding(options: .diacriticInsensitive, locale: nil).lowercased()
         var text = folded.replacing(/#\d+/, with: " ")
@@ -23,7 +23,7 @@ enum Categorizer {
             .split(separator: " ").map(String.init)
             .filter { !($0.count >= 3 && $0.allSatisfy(\.isNumber)) }
         while let last = tokens.last, companySuffixes.contains(last) || locations.contains(last) { tokens.removeLast() }
-        return tokens.isEmpty ? folded.trimmingCharacters(in: .whitespacesAndNewlines) : tokens.joined(separator: " ")
+        return (tokens.isEmpty ? folded.split(whereSeparator: \.isWhitespace).map(String.init) : tokens).joined(separator: " ")
     }
 
     private static func rules(_ defaults: UserDefaults) -> [String: String] {
@@ -70,15 +70,16 @@ enum Categorizer {
         return Budgets.named(name, in: categories)
     }
 
-    /// Sets every transaction whose normalized merchant equals `merchant`'s to `category`
-    /// (categoryIsAuto = false on all matches), saves, returns the count whose category changed. Blank merchant = no-op.
+    /// Sets every uncategorized or auto-categorized transaction whose normalized merchant equals `merchant`'s to
+    /// `category` (categoryIsAuto = false on those), saves, returns the count whose category changed.
+    /// Manual picks are left untouched. Blank merchant = no-op.
     @MainActor
     static func applyToAll(merchant: String, category: Category?, context: ModelContext) -> Int {
         let key = normalize(merchant)
         guard !key.isEmpty else { return 0 }
         // ponytail: fetches every transaction and normalizes in memory; add a stored normalized column if this gets slow.
         let matches = ((try? context.fetch(FetchDescriptor<Transaction>())) ?? [])
-            .filter { normalize($0.merchant) == key }
+            .filter { ($0.category == nil || $0.categoryIsAuto) && normalize($0.merchant) == key }
         var changed = 0
         for transaction in matches {
             transaction.categoryIsAuto = false

@@ -10,6 +10,7 @@ private func choices(_ accounts: [Account], keeping: [Account?]) -> [Account] {
 /// New or existing transaction (#36).
 struct TransactionEditor: View {
     let transaction: Transaction?
+    private let originalMerchant: String?  // captured: canPrefill runs after awaits, when the model may be deleted
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Query private var accounts: [Account]
@@ -31,6 +32,7 @@ struct TransactionEditor: View {
 
     init(transaction: Transaction?, account: Account? = nil) {
         self.transaction = transaction
+        originalMerchant = transaction?.merchant
         let account = account ?? transaction?.account
         _income = State(initialValue: (transaction?.amount ?? 0) > 0)
         _amount = State(initialValue: transaction.map { Accounts.plain(abs($0.amount)) } ?? "")
@@ -167,7 +169,16 @@ struct TransactionEditor: View {
         categoryIsAuto = false
     }
 
-    private var canPrefill: Bool { !picked && (category == nil || categoryIsAuto) }
+    private var canPrefill: Bool {
+        Self.shouldPrefill(picked: picked, hasCategory: category != nil, isAuto: categoryIsAuto,
+                           merchant: merchant, original: originalMerchant)
+    }
+
+    /// Pure. Never after a user pick or over a manual category; for an existing transaction only once
+    /// its merchant changes (`original` = loaded merchant, nil when new), so opening it never re-suggests.
+    static func shouldPrefill(picked: Bool, hasCategory: Bool, isAuto: Bool, merchant: String, original: String?) -> Bool {
+        !picked && (!hasCategory || isAuto) && merchant != original
+    }
 
     /// Rule instantly, else the model after a typing pause; never overrides a user pick.
     private func prefillCategory() async {

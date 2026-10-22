@@ -170,7 +170,9 @@ struct UncategorizedView: View {
         Task { await Budgets.checkAlerts(for: category, on: date, context: modelContext) }
         guard !merchant.isEmpty else { return }
         let key = Categorizer.normalize(merchant)
-        let count = transactions.filter { Categorizer.normalize($0.merchant) == key && $0.category !== category }.count
+        let count = transactions.filter {
+            ($0.category == nil || $0.categoryIsAuto) && Categorizer.normalize($0.merchant) == key && $0.category !== category
+        }.count
         if count > 0 { applying = (category, category.name, merchant, count) }
     }
 }
