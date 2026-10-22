@@ -73,7 +73,8 @@ extension Accounts {
 
         let groceries = Category(name: "Groceries", icon: "cart", color: 0x34C759)
         let transport = Category(name: "Transport", icon: "car", color: 0x007AFF)
-        let income = Category(name: "Income", icon: "banknote", color: 0x30B0C7)
+        let income = Category(name: "Salary", icon: "banknote", color: 0x30B0C7)
+        income.isIncome = true
         let dining = Category(name: "Dining", icon: "fork.knife", color: 0xFF9500)
         // Screenshot budgets vs the rows below: groceries ~83% orange, transport >100% red, dining green.
         for (index, (category, budget)) in [(groceries, 180), (transport, 50), (income, nil), (dining, 100)].enumerated() {
@@ -96,6 +97,7 @@ extension Accounts {
             ("GRAB*RIDE #4410", "-14.20", nil, day + 1_800),
             ("Grab SG", "-11.30", nil, 7_200),
             ("Kopi Corner", "-4.80", nil, 1_800),
+            ("Freelance", "+650", nil, day - 3_600),
         ]
         for (merchant, amount, category, ago) in rows {
             let transaction = Transaction(amount: Decimal(string: amount)!, currency: "SGD", date: date(ago))
@@ -144,6 +146,16 @@ extension Accounts {
             bill.remindDays = remind
             bill.active = active
         }
+        func goal(_ name: String, _ target: Decimal, _ currency: String, months: Int?) -> Goal {
+            let goal = Goal(name: name, target: target, currency: currency)
+            context.insert(goal)
+            goal.targetDate = months.flatMap { Calendar.current.date(byAdding: .month, value: $0, to: today) }
+            return goal
+        }
+        goal("Emergency fund", 10_000, "SGD", months: 12).account = dbs
+        goal("Japan trip", 3_000, "SGD", months: 6).contributions = [(500, 60), (400, 30), (350, 5)]
+            .map { GoalContribution(amount: Decimal($0.0), date: .now - Double($0.1) * day) }
+        goal("New laptop", 2_500, "USD", months: nil).contributions = [GoalContribution(amount: 300, date: .now - 10 * day)]
         try? context.save()
     }
 }
