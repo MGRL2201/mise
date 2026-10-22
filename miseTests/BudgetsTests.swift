@@ -133,10 +133,14 @@ struct BudgetsTests {
         let moved = transaction(-10, food)
         moved.categoryIsAuto = true
         let orphan = transaction(-5, misc)
+        let bill = Bill(name: "Meal kit", amount: 50, currency: "SGD", nextDue: month.start)
+        context.insert(bill)
+        bill.category = food
         try context.save()
 
         Budgets.delete(food, reassigningTo: dining, context: context)
         #expect(moved.category === dining)
+        #expect(bill.category === dining)
         #expect(!moved.categoryIsAuto)
 
         Budgets.delete(misc, reassigningTo: nil, context: context)

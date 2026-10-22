@@ -29,6 +29,8 @@ struct Backup: Codable {
     var categories: [CategoryRecord]?
     var transactions: [TransactionRecord]?
     var transfers: [TransferRecord]?
+    /// Optional: files before #38 lack them.
+    var bills: [BillRecord]?
 
     struct AccountRecord: Codable {
         var id: UUID
@@ -74,6 +76,22 @@ struct Backup: Codable {
         var toAmount: Decimal
         var date: Date
         var notes: String
+    }
+
+    struct BillRecord: Codable {
+        var id: UUID
+        var name: String
+        var amount: Decimal
+        var currency: String
+        var accountID: UUID?
+        var categoryID: UUID?
+        var cadence: BillCadence
+        var interval: Int
+        var nextDue: Date
+        var anchorDay: Int
+        var remindDays: Int
+        var active: Bool
+        var createdAt: Date
     }
 
     struct WakeAlarmRecord: Codable {
@@ -160,13 +178,20 @@ enum BackupService {
             Backup.TransferRecord(id: $0.id, fromID: $0.from?.id, toID: $0.to?.id, amount: $0.amount,
                                   toAmount: $0.toAmount, date: $0.date, notes: $0.notes)
         }
+        let bills = try context.fetch(FetchDescriptor<Bill>()).map {
+            Backup.BillRecord(id: $0.id, name: $0.name, amount: $0.amount, currency: $0.currency,
+                              accountID: $0.account?.id, categoryID: $0.category?.id, cadence: $0.cadence,
+                              interval: $0.interval, nextDue: $0.nextDue, anchorDay: $0.anchorDay,
+                              remindDays: $0.remindDays, active: $0.active, createdAt: $0.createdAt)
+        }
         var settings: [String: Any] = [:]
         for key in Backup.settingsKeys { settings[key] = defaults.object(forKey: key) }
         return try JSONEncoder().encode(Backup(
             version: Backup.currentVersion, createdAt: .now, attachments: attachments,
             settings: PropertyListSerialization.data(fromPropertyList: settings, format: .binary, options: 0),
             tags: tags, taskExtras: taskExtras, wakeAlarms: wakeAlarms, wakeLogs: wakeLogs,
-            accounts: accounts, categories: categories, transactions: transactions, transfers: transfers))
+            accounts: accounts, categories: categories, transactions: transactions, transfers: transfers,
+            bills: bills))
     }
 
     static func restore(_ data: Data, context: ModelContext, files: AttachmentFileStore, defaults: UserDefaults) throws {
@@ -235,6 +260,7 @@ enum BackupService {
             if let accountRecords = backup.accounts {
                 try context.fetch(FetchDescriptor<Transaction>()).forEach(context.delete)
                 try context.fetch(FetchDescriptor<Transfer>()).forEach(context.delete)
+                try context.fetch(FetchDescriptor<Bill>()).forEach(context.delete)
                 try context.fetch(FetchDescriptor<Category>()).forEach(context.delete)
                 try context.fetch(FetchDescriptor<Account>()).forEach(context.delete)
                 var accounts: [UUID: Account] = [:]
@@ -277,6 +303,20 @@ enum BackupService {
                     context.insert(transfer)
                     transfer.from = record.fromID.flatMap { accounts[$0] }
                     transfer.to = record.toID.flatMap { accounts[$0] }
+                }
+                for record in backup.bills ?? [] {
+                    let bill = Bill(name: record.name, amount: record.amount, currency: record.currency,
+                                    nextDue: record.nextDue)
+                    bill.id = record.id
+                    bill.cadence = record.cadence
+                    bill.interval = record.interval
+                    bill.anchorDay = record.anchorDay
+                    bill.remindDays = record.remindDays
+                    bill.active = record.active
+                    bill.createdAt = record.createdAt
+                    context.insert(bill)
+                    bill.account = record.accountID.flatMap { accounts[$0] }
+                    bill.category = record.categoryID.flatMap { categories[$0] }
                 }
             }
             try context.save()

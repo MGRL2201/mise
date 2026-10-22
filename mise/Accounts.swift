@@ -120,6 +120,30 @@ extension Accounts {
             transfer.to = to
             context.insert(transfer)
         }
+        let housing = Category(name: "Housing", icon: "house", color: 0x8E6E53)
+        housing.sortOrder = 4
+        context.insert(housing)
+        let today = Calendar.current.startOfDay(for: .now)
+        let bills: [(String, String, String, Account, Category?, BillCadence, Int, Int, Int, Bool)] = [
+            // name, amount, currency, account, category, cadence, interval, due in days, remind days, active
+            ("Rent", "2400", "SGD", dbs, housing, .monthly, 1, -1, 3, true),
+            ("Netflix", "17.98", "SGD", citi, nil, .monthly, 1, 2, 2, true),
+            ("iCloud+", "2.99", "USD", wise, nil, .monthly, 1, 9, 3, true),
+            ("Domain renewal", "12", "USD", wise, nil, .yearly, 1, 40, 3, true),
+            ("Gym", "25", "SGD", dbs, nil, .weekly, 2, 5, 3, true),
+            ("Spotify", "10.98", "SGD", citi, nil, .monthly, 1, 12, 3, false),
+        ]
+        for (name, amount, currency, account, category, cadence, interval, dueIn, remind, active) in bills {
+            let bill = Bill(name: name, amount: Decimal(string: amount)!, currency: currency,
+                            nextDue: Calendar.current.date(byAdding: .day, value: dueIn, to: today)!)
+            context.insert(bill)
+            bill.account = account
+            bill.category = category
+            bill.cadence = cadence
+            bill.interval = interval
+            bill.remindDays = remind
+            bill.active = active
+        }
         try? context.save()
     }
 }

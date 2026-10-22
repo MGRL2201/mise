@@ -2,7 +2,7 @@ import SwiftUI
 import SwiftData
 
 /// Non-archived accounts by name, plus `keeping` (current selections) even if archived.
-private func choices(_ accounts: [Account], keeping: [Account?]) -> [Account] {
+func choices(_ accounts: [Account], keeping: [Account?]) -> [Account] {
     accounts.filter { account in !account.archived || keeping.contains { $0 == account } }
         .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
 }
