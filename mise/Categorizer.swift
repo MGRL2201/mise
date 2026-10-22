@@ -30,10 +30,10 @@ enum Categorizer {
         defaults.dictionary(forKey: rulesKey) as? [String: String] ?? [:]
     }
 
-    /// Rule category for this merchant among `categories` (stale ids resolve to nil).
+    /// Rule category for this merchant among `categories` (stale ids and income categories resolve to nil).
     static func rule(for merchant: String, in categories: [Category], defaults: UserDefaults = .standard) -> Category? {
         guard let id = rules(defaults)[normalize(merchant)] else { return nil }
-        return categories.first { $0.id.uuidString == id }
+        return categories.first { !$0.isIncome && $0.id.uuidString == id }
     }
 
     /// Record the user's choice. nil category removes the rule. Empty normalized merchant = no-op.
@@ -51,6 +51,7 @@ enum Categorizer {
     static func suggest(merchant: String, amount: Decimal, categories: [Category],
                         defaults: UserDefaults = .standard,
                         modelAvailable: Bool = OnDeviceAI.unavailableReason == nil) async -> Category? {
+        let categories = categories.filter { !$0.isIncome }  // outflow-only: income is never suggested
         if let rule = rule(for: merchant, in: categories, defaults: defaults) { return rule }
         let merchant = merchant.trimmingCharacters(in: .whitespacesAndNewlines)
         var names: [String] = []  // case-insensitive dedupe; "Uncategorized" only if no category has that name
@@ -72,14 +73,14 @@ enum Categorizer {
 
     /// Sets every uncategorized or auto-categorized transaction whose normalized merchant equals `merchant`'s to
     /// `category` (categoryIsAuto = false on those), saves, returns the count whose category changed.
-    /// Manual picks are left untouched. Blank merchant = no-op.
+    /// Manual picks and inflows are left untouched. Blank merchant = no-op.
     @MainActor
     static func applyToAll(merchant: String, category: Category?, context: ModelContext) -> Int {
         let key = normalize(merchant)
         guard !key.isEmpty else { return 0 }
         // ponytail: fetches every transaction and normalizes in memory; add a stored normalized column if this gets slow.
         let matches = ((try? context.fetch(FetchDescriptor<Transaction>())) ?? [])
-            .filter { ($0.category == nil || $0.categoryIsAuto) && normalize($0.merchant) == key }
+            .filter { $0.amount < 0 && ($0.category == nil || $0.categoryIsAuto) && normalize($0.merchant) == key }
         var changed = 0
         for transaction in matches {
             transaction.categoryIsAuto = false

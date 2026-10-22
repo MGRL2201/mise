@@ -34,6 +34,21 @@ struct CategorizerTests {
         #expect(Categorizer.rule(for: "Starbucks", in: categories, defaults: defaults) == nil)
     }
 
+    @Test func ruleIgnoresIncomeCategories() {
+        let salary = mise.Category(name: "Salary")
+        salary.isIncome = true
+        Categorizer.learn("ACME Corp", category: salary, defaults: defaults)
+        #expect(Categorizer.rule(for: "ACME", in: [food, salary], defaults: defaults) == nil)
+    }
+
+    @Test func applyToAllSkipsInflows() {
+        let refund = mise.Transaction(amount: 10, currency: "SGD", date: .now)
+        refund.merchant = "Grab"
+        context.insert(refund)
+        #expect(Categorizer.applyToAll(merchant: "Grab", category: food, context: context) == 0)
+        #expect(refund.category == nil)
+    }
+
     @Test func suggestRuleWinsElseNilWithoutModel() async {
         Categorizer.learn("Starbucks", category: coffee, defaults: defaults)
         #expect(await Categorizer.suggest(merchant: "STARBUCKS #1", amount: -5, categories: [food, coffee],

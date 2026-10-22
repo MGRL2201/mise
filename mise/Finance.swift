@@ -46,6 +46,8 @@ final class Category {
     var sortOrder: Int = 0
     /// Monthly budget in the home currency; nil = no budget.
     var budget: Decimal?
+    /// Income categories are separate from spending: no budget, never auto-suggested.
+    var isIncome: Bool = false
     @Relationship(deleteRule: .nullify, inverse: \Transaction.category) var transactions: [Transaction]? = []
     @Relationship(deleteRule: .nullify, inverse: \Bill.category) var bills: [Bill]? = []
 

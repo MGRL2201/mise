@@ -8,6 +8,7 @@ enum Budgets {
     // ponytail: grows by ≤2 ids per category per month; prune old months if it ever matters.
     static let sentKey = "budget.alerted"
     static let starterKey = "finance.starterCategories"
+    static let incomeStarterKey = "finance.starterIncome"
 
     static let starter: [(name: String, icon: String, color: Int)] = [
         ("Groceries", "cart", 0x34C759),
@@ -20,6 +21,11 @@ enum Budgets {
         ("Entertainment", "film", 0xAF52DE),
         ("Travel", "airplane", 0x5AC8FA),
         ("Subscriptions", "repeat", 0x5856D6),
+    ]
+
+    static let incomeStarter: [(name: String, icon: String, color: Int)] = [
+        ("Salary", "banknote", 0x30B0C7),
+        ("Other income", "plus.circle", 0x34C759),
     ]
 
     /// Seeds the starter set once per install; never again, even after the user deletes them all.
@@ -35,6 +41,25 @@ enum Budgets {
             guard (try? context.save()) != nil else { return }
         }
         defaults.set(true, forKey: starterKey)
+    }
+
+    /// Adds the income starter set once, also for installs from before #39. Skipped if any income category exists.
+    @MainActor
+    static func addStarterIncome(context: ModelContext, defaults: UserDefaults = .standard) {
+        if defaults.bool(forKey: incomeStarterKey) { return }
+        let categories = (try? context.fetch(FetchDescriptor<Category>())) ?? []
+        if !categories.contains(where: \.isIncome) {
+            var order = (categories.map(\.sortOrder).max() ?? -1) + 1
+            for item in incomeStarter where named(item.name, in: categories) == nil {
+                let category = Category(name: item.name, icon: item.icon, color: item.color)
+                category.isIncome = true
+                category.sortOrder = order
+                order += 1
+                context.insert(category)
+            }
+            guard (try? context.save()) != nil else { return }
+        }
+        defaults.set(true, forKey: incomeStarterKey)
     }
 
     static func ordered(_ categories: [Category]) -> [Category] {

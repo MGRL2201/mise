@@ -50,6 +50,8 @@ struct Backup: Codable {
         /// Optional: files before #37 lack them.
         var sortOrder: Int?
         var budget: Decimal?
+        /// Optional: files before #39 lack it.
+        var isIncome: Bool?
     }
 
     struct TransactionRecord: Codable {
@@ -165,7 +167,7 @@ enum BackupService {
         }
         let categories = try context.fetch(FetchDescriptor<Category>()).map {
             Backup.CategoryRecord(id: $0.id, name: $0.name, icon: $0.icon, color: $0.color,
-                                  sortOrder: $0.sortOrder, budget: $0.budget)
+                                  sortOrder: $0.sortOrder, budget: $0.budget, isIncome: $0.isIncome)
         }
         let transactions = try context.fetch(FetchDescriptor<Transaction>()).map {
             Backup.TransactionRecord(id: $0.id, amount: $0.amount, currency: $0.currency, date: $0.date,
@@ -279,6 +281,7 @@ enum BackupService {
                     category.id = record.id
                     category.sortOrder = record.sortOrder ?? 0
                     category.budget = record.budget
+                    category.isIncome = record.isIncome ?? false
                     context.insert(category)
                     categories[record.id] = category
                 }

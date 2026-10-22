@@ -90,7 +90,10 @@ struct FinanceView: View {
             #endif
         }
         .task {
-            if !Storage.inMemory { Budgets.addStarterCategories(context: modelContext) }
+            if !Storage.inMemory {
+                Budgets.addStarterCategories(context: modelContext)  // first: it only seeds an empty store
+                Budgets.addStarterIncome(context: modelContext)
+            }
             rates = .load()
             await FX.refresh(context: modelContext)
             rates = .load()

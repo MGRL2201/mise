@@ -184,7 +184,10 @@ extension BackupTests {
         let transfer = Transfer(amount: 40, toAmount: 40, date: Date(timeIntervalSince1970: 2000))
         transfer.notes = "pay card"
         [account, debit].forEach(source.context.insert)
+        let salary = mise.Category(name: "Salary")
+        salary.isIncome = true
         source.context.insert(category)
+        source.context.insert(salary)
         source.context.insert(transaction)
         source.context.insert(transfer)
         transaction.account = account
@@ -204,8 +207,10 @@ extension BackupTests {
         let card = try #require(accounts.first { $0.id == account.id })
         #expect(card.type == .credit && card.currency == "SGD" && card.openingBalance == Decimal(string: "19.99"))
         #expect(card.archived && card.createdAt == account.createdAt)
-        let categories = try target.context.fetch(FetchDescriptor<mise.Category>())
-        #expect(categories.map(\.name) == ["Food"])
+        let all = try target.context.fetch(FetchDescriptor<mise.Category>())
+        #expect(Set(all.map(\.name)) == ["Food", "Salary"])
+        #expect(all.filter(\.isIncome).map(\.name) == ["Salary"])
+        let categories = all.filter { !$0.isIncome }
         #expect(categories.first?.id == category.id && categories.first?.icon == "fork.knife" && categories.first?.color == 0xFF8800)
         #expect(categories.first?.sortOrder == 3 && categories.first?.budget == Decimal(string: "450.50"))
         let copy = try #require(try target.context.fetch(FetchDescriptor<mise.Transaction>()).first)
