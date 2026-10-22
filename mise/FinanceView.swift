@@ -11,10 +11,12 @@ struct FinanceView: View {
     @State private var newTransaction = false
     @State private var newTransfer = false
     @State private var askHome = false
+    @Bindable private var billPrompt = BillPrompt.shared
     #if DEBUG
     @State private var debugOpened = false
     @State private var showingAll = false
     @State private var showingBudgets = false
+    @State private var showingBills = false
     @State private var showingUncategorized = false
     #if os(iOS)
     @State private var showingApplePay = false
@@ -54,11 +56,14 @@ struct FinanceView: View {
         #if DEBUG
         .navigationDestination(isPresented: $showingAll) { AllTransactionsView() }
         .navigationDestination(isPresented: $showingBudgets) { BudgetsView() }
+        .navigationDestination(isPresented: $showingBills) { BillsView() }
         .navigationDestination(isPresented: $showingUncategorized) { UncategorizedView() }
         #if os(iOS)
         .navigationDestination(isPresented: $showingApplePay) { ApplePaySettingsView() }
         #endif
         #endif
+        // A bill reminder tap lands here (ContentView switches to Money).
+        .navigationDestination(isPresented: $billPrompt.isPresented) { BillsView() }
         .sheet(isPresented: $isAdding) { AccountEditor(account: nil) }
         .sheet(isPresented: $newTransaction) { TransactionEditor(transaction: nil) }
         .sheet(isPresented: $newTransfer) { TransferEditor(transfer: nil) }
@@ -66,7 +71,7 @@ struct FinanceView: View {
         .onAppear {
             if accounts.isEmpty && !confirmed { askHome = true }
             #if DEBUG
-            // Screenshot hook: `-miseMoney transaction|transfer|all|budgets|uncategorized|applepay`, once per launch.
+            // Screenshot hook: `-miseMoney transaction|transfer|all|budgets|bills|uncategorized|applepay`, once per launch.
             if !debugOpened {
                 debugOpened = true
                 switch UserDefaults.standard.string(forKey: "miseMoney") {
@@ -74,6 +79,7 @@ struct FinanceView: View {
                 case "transfer": newTransfer = true
                 case "all": showingAll = true
                 case "budgets": showingBudgets = true
+                case "bills": showingBills = true
                 case "uncategorized": showingUncategorized = true
                 #if os(iOS)
                 case "applepay": showingApplePay = true
@@ -109,6 +115,7 @@ struct FinanceView: View {
             Section {
                 NavigationLink("All Transactions") { AllTransactionsView() }
                 NavigationLink("Budgets") { BudgetsView() }
+                NavigationLink("Bills") { BillsView() }
                 #if os(iOS)  // Shortcuts Transaction automations are iPhone-only; settings live in local UserDefaults
                 NavigationLink("Apple Pay") { ApplePaySettingsView() }
                 #endif

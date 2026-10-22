@@ -87,6 +87,7 @@ struct ContentView: View {
     @State private var macSelection: Destination? = .today
     @Environment(AppLock.self) private var lock
     private let planning = PlanningPrompt.shared
+    private let billPrompt = BillPrompt.shared
     #if os(iOS)
     @Bindable private var wake = WakePrompt.shared
     #endif
@@ -143,6 +144,10 @@ struct ContentView: View {
         #if DEBUG
         .onAppear { if let debugTab { macSelection = debugTab } }
         #endif
+        // Bill reminder tap: FinanceView pushes Bills (after unlock if Money is locked).
+        .onChange(of: billPrompt.isPresented, initial: true) { _, shown in if shown { macSelection = .money } }
+        // Leaving Money drops a pending/pushed Bills so the next reminder tap fires onChange again.
+        .onChange(of: macSelection) { _, new in if new != .money { billPrompt.isPresented = false } }
         #else
         TabView(selection: $tab) {
             Tab("Today", systemImage: Destination.today.systemImage, value: .today) {
@@ -181,6 +186,8 @@ struct ContentView: View {
         #if DEBUG
         .onAppear { if let debugTab { select(debugTab) } }
         #endif
+        .onChange(of: billPrompt.isPresented, initial: true) { _, shown in if shown { select(.money) } }
+        .onChange(of: tab) { _, new in if new != .money { billPrompt.isPresented = false } }
         #endif
     }
 

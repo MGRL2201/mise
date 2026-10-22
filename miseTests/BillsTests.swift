@@ -120,4 +120,19 @@ struct BillsTests {
         #expect(b.nextDue == date(2027, 3, 31))
         #expect(((try? context.fetch(FetchDescriptor<mise.Transaction>())) ?? []).count == 2)
     }
+
+    @Test func cadenceLabelReadsNaturally() {
+        #expect(Bills.cadenceLabel(.monthly, interval: 1) == "Monthly")
+        #expect(Bills.cadenceLabel(.weekly, interval: 2) == "Every 2 weeks")
+        #expect(Bills.cadenceLabel(.yearly, interval: 3) == "Every 3 years")
+    }
+
+    @Test func anchorDayMovesOnlyWithDateOrCadence() {
+        func anchor(_ newDue: Date, _ old: BillCadence = .monthly, _ new: BillCadence = .monthly, oldDue: Date) -> Int {
+            Bills.anchorDay(current: 31, oldDue: oldDue, newDue: newDue, oldCadence: old, newCadence: new, calendar: calendar)
+        }
+        #expect(anchor(date(2027, 2, 28, hour: 0), oldDue: date(2027, 2, 28, hour: 0)) == 31)
+        #expect(anchor(date(2027, 3, 10), oldDue: date(2027, 2, 28, hour: 0)) == 10)
+        #expect(anchor(date(2027, 2, 24), .weekly, .monthly, oldDue: date(2027, 2, 24, hour: 0)) == 24)
+    }
 }

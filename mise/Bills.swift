@@ -60,12 +60,29 @@ enum Bills {
         return calendar.date(from: components)!
     }
 
+    /// Keep the anchor unless the due day or cadence changed: an edited Feb 28 bill anchored to the 31st stays on the 31st.
+    static func anchorDay(current: Int, oldDue: Date, newDue: Date, oldCadence: BillCadence, newCadence: BillCadence,
+                          calendar: Calendar = .current) -> Int {
+        guard oldCadence != newCadence || !calendar.isDate(oldDue, inSameDayAs: newDue) else { return current }
+        return calendar.component(.day, from: newDue)
+    }
+
     static func monthlyAmount(_ amount: Decimal, cadence: BillCadence, interval: Int) -> Decimal {
         let interval = Decimal(max(interval, 1))
         switch cadence {
         case .weekly: return amount * 52 / 12 / interval
         case .monthly: return amount / interval
         case .yearly: return amount / 12 / interval
+        }
+    }
+
+    /// "Monthly", "Every 2 weeks".
+    static func cadenceLabel(_ cadence: BillCadence, interval: Int) -> String {
+        guard interval > 1 else { return cadence.rawValue.capitalized }
+        switch cadence {
+        case .weekly: return "Every \(interval) weeks"
+        case .monthly: return "Every \(interval) months"
+        case .yearly: return "Every \(interval) years"
         }
     }
 
