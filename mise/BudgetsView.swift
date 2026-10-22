@@ -16,6 +16,27 @@ extension Category {
     }
 }
 
+/// "‹ October 2026 ›" row; shared by Budgets and the Money tab's income & spend.
+struct MonthSwitcher: View {
+    @Binding var month: Date
+
+    var body: some View {
+        HStack {
+            Button("Previous Month", systemImage: "chevron.left") { shift(-1) }
+            Spacer()
+            Text(month, format: .dateTime.month(.wide).year()).font(.headline)
+            Spacer()
+            Button("Next Month", systemImage: "chevron.right") { shift(1) }
+        }
+        .labelStyle(.iconOnly)
+        .buttonStyle(.borderless)
+    }
+
+    private func shift(_ months: Int) {
+        month = Calendar.current.date(byAdding: .month, value: months, to: month) ?? month
+    }
+}
+
 /// Month-by-month spend per category against its budget (#37).
 struct BudgetsView: View {
     @Environment(\.theme) private var theme
@@ -34,15 +55,7 @@ struct BudgetsView: View {
         let budgeted = ordered.filter { $0.budget != nil }
         Form {
             Section {
-                HStack {
-                    Button("Previous Month", systemImage: "chevron.left") { shift(-1) }
-                    Spacer()
-                    Text(month, format: .dateTime.month(.wide).year()).font(.headline)
-                    Spacer()
-                    Button("Next Month", systemImage: "chevron.right") { shift(1) }
-                }
-                .labelStyle(.iconOnly)
-                .buttonStyle(.borderless)
+                MonthSwitcher(month: $month)
             }
             .listRowBackground(Color(theme.surface))
             Section("Total") {
@@ -92,10 +105,6 @@ struct BudgetsView: View {
         .sheet(isPresented: $isAdding) { CategoryEditor(category: nil) }
         .sheet(item: $editing) { CategoryEditor(category: $0) }
         .task { rates = .load() }
-    }
-
-    private func shift(_ months: Int) {
-        month = Calendar.current.date(byAdding: .month, value: months, to: month) ?? month
     }
 
     /// "S$123 of S$500" with a green / orange (80%) / red (100%) bar, or just the spend without a budget.

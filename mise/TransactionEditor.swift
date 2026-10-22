@@ -161,6 +161,7 @@ struct TransactionEditor: View {
         let name = newCategory.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
         if let existing = Budgets.named(name, in: categories) {
+            guard existing.isIncome == income else { return }  // names are unique across kinds; keep the text
             category = existing
         } else {
             let created = Category(name: name)

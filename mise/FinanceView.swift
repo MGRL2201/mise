@@ -6,7 +6,9 @@ struct FinanceView: View {
     @Environment(\.theme) private var theme
     @Environment(\.modelContext) private var modelContext
     @Query private var accounts: [Account]
+    @Query private var transactions: [Transaction]
     @State private var rates = FXRates()
+    @State private var month = Calendar.current.dateInterval(of: .month, for: .now)!.start
     @State private var isAdding = false
     @State private var newTransaction = false
     @State private var newTransfer = false
@@ -107,10 +109,29 @@ struct FinanceView: View {
             accounts.map { (amount: Finance.balance(of: $0, rates: rates), currency: $0.currency) },
             rates: rates, home: home
         )
+        let interval = Calendar.current.dateInterval(of: .month, for: month)!
+        let income = Finance.homeIncome(transactions, in: interval, rates: rates, home: home)
+        let spend = Finance.homeSpend(transactions, in: interval, rates: rates, home: home)
+        let net = income.total - spend.total
+        let unconverted = income.unconverted.merging(spend.unconverted.mapValues { -$0 }, uniquingKeysWith: +)
         return Form {
             Section("Net worth") {
                 Text(worth.total, format: .currency(code: home)).font(.title2)
                 ForEach(worth.unconverted.filter { $0.value != 0 }.sorted { $0.key < $1.key }, id: \.key) { code, amount in
+                    Text("\(amount.formatted(.currency(code: code))) (no rate)").foregroundStyle(.secondary)
+                }
+            }
+            .listRowBackground(Color(theme.surface))
+            Section("Income & spend") {
+                MonthSwitcher(month: $month)
+                LabeledContent("Income") {
+                    Text(income.total, format: .currency(code: home)).foregroundStyle(.green)
+                }
+                LabeledContent("Spend", value: spend.total, format: .currency(code: home))
+                LabeledContent("Net") {
+                    Text(net, format: .currency(code: home)).foregroundStyle(net < 0 ? .red : .primary)
+                }
+                ForEach(unconverted.filter { $0.value != 0 }.sorted { $0.key < $1.key }, id: \.key) { code, amount in
                     Text("\(amount.formatted(.currency(code: code))) (no rate)").foregroundStyle(.secondary)
                 }
             }

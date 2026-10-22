@@ -133,4 +133,32 @@ struct FinanceTests {
         #expect(result.total == Decimal(string: "44.50"))
         #expect(result.unconverted == ["VND": 50000])
     }
+
+    @Test func homeIncomeAndSpend() {
+        let salary = mise.Category(name: "Salary")
+        salary.isIncome = true
+        let food = mise.Category(name: "Food")
+        context.insert(salary)
+        context.insert(food)
+        let range = DateInterval(start: start, duration: 86_400)
+        let paid = transaction(5000, on: nil, at: start)
+        paid.category = salary
+        let refund = transaction(20, on: nil, at: start)
+        refund.category = food
+        let lunch = transaction(-300, on: nil, at: start)
+        lunch.category = food
+        let foreign = transaction(100, on: nil, currency: "USD", at: start)
+        foreign.homeAmount = 130
+        foreign.category = salary
+        let all = [
+            paid, refund, lunch, foreign,
+            transaction(100, on: nil, at: start),
+            transaction(999, on: nil, at: range.end),
+            transaction(50000, on: nil, currency: "VND", at: start),
+        ]
+        let income = Finance.homeIncome(all, in: range, rates: FXRates(), home: "SGD")
+        #expect(income.total == 5230)
+        #expect(income.unconverted == ["VND": 50000])
+        #expect(Finance.homeSpend(all, in: range, rates: FXRates(), home: "SGD").total == 300)
+    }
 }
