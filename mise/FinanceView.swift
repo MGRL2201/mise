@@ -216,6 +216,7 @@ struct AccountEditor: View {
         return (account.transactions ?? []).isEmpty
             && (account.outgoingTransfers ?? []).isEmpty
             && (account.incomingTransfers ?? []).isEmpty
+            && (account.bills ?? []).isEmpty
     }
 
     var body: some View {
@@ -249,7 +250,7 @@ struct AccountEditor: View {
                                 }
                         }
                     } footer: {
-                        if !canDelete { Text("Accounts with transactions can be archived, not deleted.") }
+                        if !canDelete { Text("Accounts with transactions or bills can be archived, not deleted.") }
                     }
                 }
             }

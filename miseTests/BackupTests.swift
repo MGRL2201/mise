@@ -221,6 +221,39 @@ extension BackupTests {
         #expect(Finance.balance(of: card, rates: FXRates()) == Decimal(string: "19.66"))
     }
 
+    @Test func billsRoundTripAndReplaceStale() throws {
+        let source = try freshStore()
+        let account = Account(name: "Card", type: .credit, currency: "SGD")
+        let category = mise.Category(name: "Subs")
+        let bill = Bill(name: "Netflix", amount: Decimal(string: "19.98")!, currency: "SGD",
+                        nextDue: Date(timeIntervalSince1970: 1_800_000_000))
+        bill.cadence = .yearly
+        bill.interval = 2
+        bill.anchorDay = 31
+        bill.remindDays = 0
+        bill.active = false
+        bill.createdAt = Date(timeIntervalSince1970: 5000)
+        source.context.insert(account)
+        source.context.insert(category)
+        source.context.insert(bill)
+        bill.account = account
+        bill.category = category
+        try source.context.save()
+
+        let target = try freshStore()
+        target.context.insert(Bill(name: "Stale", amount: 1, currency: "USD", nextDue: .now))
+        try target.context.save()
+        try restore(try export(source), into: target)
+
+        let bills = try target.context.fetch(FetchDescriptor<Bill>())
+        let copy = try #require(bills.first)
+        #expect(bills.count == 1)
+        #expect(copy.id == bill.id && copy.name == "Netflix" && copy.amount == Decimal(string: "19.98") && copy.currency == "SGD")
+        #expect(copy.cadence == .yearly && copy.interval == 2 && copy.nextDue == bill.nextDue && copy.anchorDay == 31)
+        #expect(copy.remindDays == 0 && !copy.active && copy.createdAt == bill.createdAt)
+        #expect(copy.account?.id == account.id && copy.category?.id == category.id)
+    }
+
     @Test func backupWithoutFinanceLeavesAccountsAlone() throws {
         let target = try freshStore()
         target.context.insert(Account(name: "Kept", type: .cash, currency: "SGD"))

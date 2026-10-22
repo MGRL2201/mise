@@ -25,6 +25,7 @@ final class Account {
     @Relationship(deleteRule: .nullify, inverse: \Transaction.account) var transactions: [Transaction]? = []
     @Relationship(deleteRule: .nullify, inverse: \Transfer.from) var outgoingTransfers: [Transfer]? = []
     @Relationship(deleteRule: .nullify, inverse: \Transfer.to) var incomingTransfers: [Transfer]? = []
+    @Relationship(deleteRule: .nullify, inverse: \Bill.account) var bills: [Bill]? = []
 
     init(name: String, type: AccountType, currency: String, openingBalance: Decimal = 0) {
         self.name = name
@@ -46,6 +47,7 @@ final class Category {
     /// Monthly budget in the home currency; nil = no budget.
     var budget: Decimal?
     @Relationship(deleteRule: .nullify, inverse: \Transaction.category) var transactions: [Transaction]? = []
+    @Relationship(deleteRule: .nullify, inverse: \Bill.category) var bills: [Bill]? = []
 
     init(name: String, icon: String = "tag", color: Int = 0) {
         self.name = name

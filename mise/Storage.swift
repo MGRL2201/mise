@@ -15,6 +15,7 @@ enum Storage {
         Category.self,
         Transaction.self,
         Transfer.self,
+        Bill.self,
     ]
 
     /// DEBUG `-miseSeedFinance YES`: in-memory seeded store; shared side effects (backup, AlarmKit) must skip.
