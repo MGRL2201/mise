@@ -30,7 +30,7 @@ struct BudgetsView: View {
     var body: some View {
         let interval = Calendar.current.dateInterval(of: .month, for: month)!
         let spent = Budgets.spent(transactions, in: interval, rates: rates, home: home)
-        let ordered = Budgets.ordered(categories)
+        let ordered = Budgets.ordered(categories.filter { !$0.isIncome })
         let budgeted = ordered.filter { $0.budget != nil }
         Form {
             Section {
@@ -137,7 +137,7 @@ struct UncategorizedView: View {
                         Spacer()
                         Text(transaction.amount, format: .currency(code: transaction.currency))
                         Menu("Assign") {
-                            ForEach(Budgets.ordered(categories)) { category in
+                            ForEach(Budgets.ordered(categories.filter { !$0.isIncome })) { category in
                                 Button { assign(transaction, to: category) } label: { category.label }
                             }
                         }
@@ -170,9 +170,7 @@ struct UncategorizedView: View {
         Task { await Budgets.checkAlerts(for: category, on: date, context: modelContext) }
         guard !merchant.isEmpty else { return }
         let key = Categorizer.normalize(merchant)
-        let count = transactions.filter {
-            ($0.category == nil || $0.categoryIsAuto) && Categorizer.normalize($0.merchant) == key && $0.category !== category
-        }.count
+        let count = transactions.filter { Categorizer.isReassignable($0, key: key) && $0.category !== category }.count
         if count > 0 { applying = (category, category.name, merchant, count) }
     }
 }
@@ -196,6 +194,7 @@ struct CategoriesView: View {
                     HStack {
                         category.label
                         Spacer()
+                        if category.isIncome { Text("Income").foregroundStyle(.secondary) }
                         Text("\(category.transactions?.count ?? 0)").foregroundStyle(.secondary)
                     }
                     .contentShape(Rectangle())
@@ -232,7 +231,7 @@ struct CategoriesView: View {
             Button("Leave Uncategorized", role: .destructive) {
                 Budgets.delete(item.category, reassigningTo: nil, context: modelContext)
             }
-            if categories.count > 1 {
+            if !targets(for: item.category).isEmpty {
                 Button("Move to…") { moving = item.category }
             }
         } message: { item in
@@ -242,7 +241,7 @@ struct CategoriesView: View {
         .sheet(item: $editing) { CategoryEditor(category: $0) }
         .sheet(item: $moving) { category in
             NavigationStack {
-                List(ordered.filter { $0.id != category.id }) { target in
+                List(targets(for: category)) { target in
                     Button {
                         moving = nil
                         Budgets.delete(category, reassigningTo: target, context: modelContext)
@@ -259,6 +258,11 @@ struct CategoriesView: View {
                 }
             }
         }
+    }
+
+    /// Same-kind categories a deleted category's transactions can move to.
+    private func targets(for category: Category) -> [Category] {
+        Budgets.ordered(categories.filter { $0.id != category.id && $0.isIncome == category.isIncome })
     }
 
     /// Delete outright when unused; otherwise ask where its transactions go.
@@ -283,6 +287,7 @@ struct CategoryEditor: View {
     @State private var icon: String
     @State private var color: Int
     @State private var budget: String
+    @State private var isIncome: Bool
 
     static let icons = Budgets.starter.map(\.icon) + [
         "tag", "gift", "book", "pawprint", "gamecontroller", "graduationcap", "wrench", "tshirt", "phone", "creditcard",
@@ -299,6 +304,7 @@ struct CategoryEditor: View {
         _icon = State(initialValue: category?.icon ?? "tag")
         _color = State(initialValue: category?.color ?? 0x8E8E93)
         _budget = State(initialValue: category?.budget.map(Accounts.plain) ?? "")
+        _isIncome = State(initialValue: category?.isIncome ?? false)
     }
 
     /// nil once deleted (backup restore, task 3 delete): the sheet must not read or write a dead model.
@@ -307,9 +313,9 @@ struct CategoryEditor: View {
         return category
     }
 
-    /// .some(nil) = no budget (empty or 0); nil = invalid (negative / unparseable).
+    /// .some(nil) = no budget (income, empty or 0); nil = invalid (negative / unparseable).
     private var budgetValue: Decimal?? {
-        if budget.trimmingCharacters(in: .whitespaces).isEmpty { return .some(nil) }
+        if isIncome || budget.trimmingCharacters(in: .whitespaces).isEmpty { return .some(nil) }
         guard let value = Accounts.parseAmount(budget), value >= 0 else { return nil }
         return value == 0 ? .some(nil) : value
     }
@@ -341,10 +347,13 @@ struct CategoryEditor: View {
                             .tag(item.color)
                         }
                     }
-                    TextField("Monthly budget (\(home))", text: $budget)
-                        #if os(iOS)
-                        .keyboardType(.decimalPad)
-                        #endif
+                    Toggle("Income category", isOn: $isIncome)
+                    if !isIncome {
+                        TextField("Monthly budget (\(home))", text: $budget)
+                            #if os(iOS)
+                            .keyboardType(.decimalPad)
+                            #endif
+                    }
                 } footer: {
                     if duplicate { Text("A category with this name already exists.") }
                 }
@@ -371,9 +380,10 @@ struct CategoryEditor: View {
         target.name = trimmed
         target.icon = icon
         target.color = color
-        target.budget = budgetValue
+        target.isIncome = isIncome
+        target.budget = budgetValue  // always nil for income
         try? modelContext.save()
-        // Ask for notification permission once, when a budget is first set; checkAlerts never prompts.
+        // Ask for notification permission once, when a budget is first set (never for income); checkAlerts never prompts.
         if budgetValue != nil, !Storage.inMemory { Task { _ = await LocalNotifications.authorized(prompt: true) } }
         dismiss()
     }

@@ -38,7 +38,23 @@ struct CategorizerTests {
         let salary = mise.Category(name: "Salary")
         salary.isIncome = true
         Categorizer.learn("ACME Corp", category: salary, defaults: defaults)
+        #expect(defaults.dictionary(forKey: Categorizer.rulesKey)?["acme"] != nil)  // written, just not resolved
         #expect(Categorizer.rule(for: "ACME", in: [food, salary], defaults: defaults) == nil)
+    }
+
+    @Test func isReassignable() {
+        func make(_ merchant: String, _ amount: Decimal) -> mise.Transaction {
+            let transaction = mise.Transaction(amount: amount, currency: "SGD", date: .now)
+            transaction.merchant = merchant
+            context.insert(transaction)
+            return transaction
+        }
+        let picked = make("Grab", -10)
+        picked.category = food
+        #expect(Categorizer.isReassignable(make("GRAB #1", -10), key: "grab"))
+        #expect(!Categorizer.isReassignable(make("Grab", 10), key: "grab"))  // inflow
+        #expect(!Categorizer.isReassignable(picked, key: "grab"))  // user pick
+        #expect(!Categorizer.isReassignable(make("FairPrice", -10), key: "grab"))
     }
 
     @Test func applyToAllSkipsInflows() {

@@ -80,7 +80,7 @@ enum Categorizer {
         guard !key.isEmpty else { return 0 }
         // ponytail: fetches every transaction and normalizes in memory; add a stored normalized column if this gets slow.
         let matches = ((try? context.fetch(FetchDescriptor<Transaction>())) ?? [])
-            .filter { $0.amount < 0 && ($0.category == nil || $0.categoryIsAuto) && normalize($0.merchant) == key }
+            .filter { isReassignable($0, key: key) }
         var changed = 0
         for transaction in matches {
             transaction.categoryIsAuto = false
@@ -91,5 +91,11 @@ enum Categorizer {
         }
         try? context.save()
         return changed
+    }
+
+    /// Outflow, uncategorized or auto-categorized, normalized merchant == `key`: what applyToAll may change.
+    static func isReassignable(_ transaction: Transaction, key: String) -> Bool {
+        transaction.amount < 0 && (transaction.category == nil || transaction.categoryIsAuto)
+            && normalize(transaction.merchant) == key
     }
 }

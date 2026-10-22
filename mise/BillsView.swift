@@ -171,7 +171,9 @@ struct BillEditor: View {
                     CurrencyPicker(title: "Currency", selection: $currency)
                     Picker("Category", selection: $category) {
                         Text("None").tag(Category?.none)
-                        ForEach(Budgets.ordered(categories), id: \.self) { Text($0.name).tag(Optional($0)) }
+                        ForEach(Budgets.ordered(categories.filter { !$0.isIncome || $0 == category }), id: \.self) {
+                            Text($0.name).tag(Optional($0))
+                        }
                     }
                 } footer: {
                     if choices(accounts, keeping: [account]).isEmpty { Text("Add an account first") }

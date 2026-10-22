@@ -99,7 +99,8 @@ struct TransactionEditor: View {
                         categoryIsAuto = false
                     })) {
                         Text("None").tag(Category?.none)
-                        ForEach(Budgets.ordered(categories), id: \.self) {
+                        // Keep the current pick so a refund in a spending category still renders.
+                        ForEach(Budgets.ordered(categories.filter { $0.isIncome == income || $0 == category }), id: \.self) {
                             Text($0.name).tag(Optional($0))
                         }
                     }
@@ -143,6 +144,9 @@ struct TransactionEditor: View {
             .onAppear {
                 if account == nil && transaction == nil { account = choices(accounts, keeping: []).first }
             }
+            .onChange(of: income) {
+                if let category, category.isIncome != income { self.category = nil; categoryIsAuto = false }
+            }
             .onChange(of: account) { old, new in
                 if old?.currency != new?.currency { charged = "" }
                 // Follow the account's currency unless the user picked a different one;
@@ -160,6 +164,7 @@ struct TransactionEditor: View {
             category = existing
         } else {
             let created = Category(name: name)
+            created.isIncome = income
             created.sortOrder = (categories.map(\.sortOrder).max() ?? -1) + 1
             modelContext.insert(created)
             category = created
@@ -169,9 +174,10 @@ struct TransactionEditor: View {
         categoryIsAuto = false
     }
 
+    /// Expenses only: income is never auto-suggested.
     private var canPrefill: Bool {
-        Self.shouldPrefill(picked: picked, hasCategory: category != nil, isAuto: categoryIsAuto,
-                           merchant: merchant, original: originalMerchant)
+        !income && Self.shouldPrefill(picked: picked, hasCategory: category != nil, isAuto: categoryIsAuto,
+                                      merchant: merchant, original: originalMerchant)
     }
 
     /// Pure. Never after a user pick or over a manual category; for an existing transaction only once
@@ -212,7 +218,8 @@ struct TransactionEditor: View {
         target.account = account
         target.category = category
         target.categoryIsAuto = categoryIsAuto && category != nil
-        if picked && !target.merchant.isEmpty { Categorizer.learn(target.merchant, category: category) }
+        // An income pick must not overwrite the merchant's spending rule.
+        if picked && !income && !target.merchant.isEmpty { Categorizer.learn(target.merchant, category: category) }
         // Also clears a stale charge when the account or currency changed.
         target.accountAmount = chargedValue == 0 ? nil : TransactionEntry.signed(chargedValue, income: income)
         target.homeAmount = nil // FX.refresh refills it for the new amount/currency/date.

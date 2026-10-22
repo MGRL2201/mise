@@ -47,7 +47,7 @@ enum Budgets {
     @MainActor
     static func addStarterIncome(context: ModelContext, defaults: UserDefaults = .standard) {
         if defaults.bool(forKey: incomeStarterKey) { return }
-        let categories = (try? context.fetch(FetchDescriptor<Category>())) ?? []
+        guard let categories = try? context.fetch(FetchDescriptor<Category>()) else { return }
         if !categories.contains(where: \.isIncome) {
             var order = (categories.map(\.sortOrder).max() ?? -1) + 1
             for item in incomeStarter where named(item.name, in: categories) == nil {
