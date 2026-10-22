@@ -36,10 +36,11 @@ enum Categorizer {
         return categories.first { !$0.isIncome && $0.id.uuidString == id }
     }
 
-    /// Record the user's choice. nil category removes the rule. Empty normalized merchant = no-op.
+    /// Record the user's choice. nil category removes the rule. Empty normalized merchant or an income
+    /// category = no-op (rules are spending-only; an income pick must not clobber the spending rule).
     static func learn(_ merchant: String, category: Category?, defaults: UserDefaults = .standard) {
         let key = normalize(merchant)
-        guard !Storage.inMemory, !key.isEmpty else { return }  // seeded sample data must never write real rules
+        guard !Storage.inMemory, !key.isEmpty, category?.isIncome != true else { return }  // seeded sample data must never write real rules
         var rules = rules(defaults)
         rules[key] = category?.id.uuidString
         defaults.set(rules, forKey: rulesKey)

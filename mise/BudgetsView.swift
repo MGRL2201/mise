@@ -182,8 +182,8 @@ struct CategoriesView: View {
     @Query private var categories: [Category]
     @State private var editing: Category?
     @State private var isAdding = false
-    /// Name and count captured up front: the dialog must not read the model after it's deleted.
-    @State private var deleting: (category: Category, name: String, count: Int)?
+    /// Name, count, canMove captured up front: the dialog must not read the model after it's deleted.
+    @State private var deleting: (category: Category, name: String, count: Int, canMove: Bool)?
     @State private var moving: Category?
 
     var body: some View {
@@ -231,7 +231,7 @@ struct CategoriesView: View {
             Button("Leave Uncategorized", role: .destructive) {
                 Budgets.delete(item.category, reassigningTo: nil, context: modelContext)
             }
-            if !targets(for: item.category).isEmpty {
+            if item.canMove {
                 Button("Move to…") { moving = item.category }
             }
         } message: { item in
@@ -240,8 +240,10 @@ struct CategoriesView: View {
         .sheet(isPresented: $isAdding) { CategoryEditor(category: nil) }
         .sheet(item: $editing) { CategoryEditor(category: $0) }
         .sheet(item: $moving) { category in
+            // Re-rendered while dismissing, after the delete below: don't read a deleted model.
+            let options = category.isDeleted || category.modelContext == nil ? [] : targets(for: category)
             NavigationStack {
-                List(targets(for: category)) { target in
+                List(options) { target in
                     Button {
                         moving = nil
                         Budgets.delete(category, reassigningTo: target, context: modelContext)
@@ -271,7 +273,7 @@ struct CategoriesView: View {
         if count == 0 {
             Budgets.delete(category, reassigningTo: nil, context: modelContext)
         } else {
-            deleting = (category, category.name, count)
+            deleting = (category, category.name, count, !targets(for: category).isEmpty)
         }
     }
 }

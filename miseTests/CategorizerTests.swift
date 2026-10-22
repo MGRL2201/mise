@@ -37,9 +37,11 @@ struct CategorizerTests {
     @Test func ruleIgnoresIncomeCategories() {
         let salary = mise.Category(name: "Salary")
         salary.isIncome = true
-        Categorizer.learn("ACME Corp", category: salary, defaults: defaults)
-        #expect(defaults.dictionary(forKey: Categorizer.rulesKey)?["acme"] != nil)  // written, just not resolved
+        defaults.set(["acme": salary.id.uuidString], forKey: Categorizer.rulesKey)  // legacy income rule
         #expect(Categorizer.rule(for: "ACME", in: [food, salary], defaults: defaults) == nil)
+        Categorizer.learn("ACME", category: food, defaults: defaults)
+        Categorizer.learn("ACME Corp", category: salary, defaults: defaults)  // income pick: no-op
+        #expect(Categorizer.rule(for: "ACME", in: [food, salary], defaults: defaults) === food)
     }
 
     @Test func isReassignable() {

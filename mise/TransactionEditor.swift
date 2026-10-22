@@ -140,7 +140,7 @@ struct TransactionEditor: View {
                         .disabled(amountValue == nil || chargedValue == nil || account == nil)
                 }
             }
-            .task(id: merchant) { await prefillCategory() }
+            .task(id: "\(income)|\(merchant)") { await prefillCategory() }
             .onAppear {
                 if account == nil && transaction == nil { account = choices(accounts, keeping: []).first }
             }
@@ -218,7 +218,7 @@ struct TransactionEditor: View {
         target.account = account
         target.category = category
         target.categoryIsAuto = categoryIsAuto && category != nil
-        // An income pick must not overwrite the merchant's spending rule.
+        // Income mode never touches rules: a nil pick would clear the merchant's spending rule.
         if picked && !income && !target.merchant.isEmpty { Categorizer.learn(target.merchant, category: category) }
         // Also clears a stale charge when the account or currency changed.
         target.accountAmount = chargedValue == 0 ? nil : TransactionEntry.signed(chargedValue, income: income)
