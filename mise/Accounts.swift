@@ -84,7 +84,7 @@ extension Accounts {
         // Clamp into this month (order kept) so the Budgets screen has spend on the 1st-3rd too.
         let monthStart = Calendar.current.dateInterval(of: .month, for: .now)!.start
         func date(_ ago: TimeInterval) -> Date { max(.now - ago, monthStart + (3 * day - ago) / 1_000) }
-        let rows: [(String, String, Category, TimeInterval)] = [
+        let rows: [(String, String, Category?, TimeInterval)] = [
             ("Salary", "5200", income, 2 * day + 3_600),
             ("FairPrice", "-84.35", groceries, 2 * day),
             ("Grab", "-18.60", transport, day + 7_200),
@@ -93,6 +93,9 @@ extension Accounts {
             ("Cold Storage", "-46.20", groceries, 10_800),
             ("Grab", "-22.10", transport, 3_600),
             ("FairPrice", "-6.75", groceries, 600),
+            ("GRAB*RIDE #4410", "-14.20", nil, day + 1_800),
+            ("Grab SG", "-11.30", nil, 7_200),
+            ("Kopi Corner", "-4.80", nil, 1_800),
         ]
         for (merchant, amount, category, ago) in rows {
             let transaction = Transaction(amount: Decimal(string: amount)!, currency: "SGD", date: date(ago))

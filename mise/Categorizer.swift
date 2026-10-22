@@ -39,7 +39,7 @@ enum Categorizer {
     /// Record the user's choice. nil category removes the rule. Empty normalized merchant = no-op.
     static func learn(_ merchant: String, category: Category?, defaults: UserDefaults = .standard) {
         let key = normalize(merchant)
-        guard !key.isEmpty else { return }
+        guard !Storage.inMemory, !key.isEmpty else { return }  // seeded sample data must never write real rules
         var rules = rules(defaults)
         rules[key] = category?.id.uuidString
         defaults.set(rules, forKey: rulesKey)
