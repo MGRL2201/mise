@@ -15,6 +15,7 @@ struct FinanceView: View {
     @State private var debugOpened = false
     @State private var showingAll = false
     @State private var showingBudgets = false
+    @State private var showingUncategorized = false
     #endif
     @AppStorage(FX.homeKey) private var home = FX.home()
     @AppStorage("finance.homeConfirmed") private var confirmed = false
@@ -50,6 +51,7 @@ struct FinanceView: View {
         #if DEBUG
         .navigationDestination(isPresented: $showingAll) { AllTransactionsView() }
         .navigationDestination(isPresented: $showingBudgets) { BudgetsView() }
+        .navigationDestination(isPresented: $showingUncategorized) { UncategorizedView() }
         #endif
         .sheet(isPresented: $isAdding) { AccountEditor(account: nil) }
         .sheet(isPresented: $newTransaction) { TransactionEditor(transaction: nil) }
@@ -58,7 +60,7 @@ struct FinanceView: View {
         .onAppear {
             if accounts.isEmpty && !confirmed { askHome = true }
             #if DEBUG
-            // Screenshot hook: `-miseMoney transaction|transfer|all|budgets`, once per launch.
+            // Screenshot hook: `-miseMoney transaction|transfer|all|budgets|uncategorized`, once per launch.
             if !debugOpened {
                 debugOpened = true
                 switch UserDefaults.standard.string(forKey: "miseMoney") {
@@ -66,6 +68,7 @@ struct FinanceView: View {
                 case "transfer": newTransfer = true
                 case "all": showingAll = true
                 case "budgets": showingBudgets = true
+                case "uncategorized": showingUncategorized = true
                 default: break
                 }
             }
@@ -382,7 +385,13 @@ struct TransactionRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(transaction.merchant.isEmpty ? "Transaction" : transaction.merchant)
                     if let category = transaction.category {
-                        Text(category.name).font(.subheadline).foregroundStyle(.secondary)
+                        HStack(spacing: 4) {
+                            Text(category.name)
+                            if transaction.categoryIsAuto {
+                                Image(systemName: "sparkles").font(.caption).accessibilityLabel("Auto")
+                            }
+                        }
+                        .font(.subheadline).foregroundStyle(.secondary)
                     }
                 }
                 Spacer()

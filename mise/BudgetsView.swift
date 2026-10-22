@@ -69,9 +69,11 @@ struct BudgetsView: View {
                     }
                     .buttonStyle(.plain)
                 }
-                VStack(alignment: .leading, spacing: 6) {
-                    Label("Uncategorized", systemImage: "questionmark.circle")
-                    amounts(spent.uncategorized, budget: nil)
+                NavigationLink { UncategorizedView() } label: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("Uncategorized", systemImage: "questionmark.circle")
+                        amounts(spent.uncategorized, budget: nil)
+                    }
                 }
             }
             .listRowBackground(Color(theme.surface))
@@ -107,6 +109,71 @@ struct BudgetsView: View {
         } else {
             Text(spent, format: .currency(code: home)).foregroundStyle(.secondary)
         }
+    }
+}
+
+/// Uncategorized outflows, newest first; assign a category and optionally apply it to the same merchant (#154).
+struct UncategorizedView: View {
+    @Environment(\.theme) private var theme
+    @Environment(\.modelContext) private var modelContext
+    @Query(sort: \Transaction.date, order: .reverse) private var transactions: [Transaction]
+    @Query private var categories: [Category]
+    /// Captured up front: the dialog must not read models after they change.
+    @State private var applying: (category: Category, name: String, merchant: String, count: Int)?
+
+    var body: some View {
+        let uncategorized = transactions.filter { $0.category == nil && $0.amount < 0 }
+        Group {
+            if uncategorized.isEmpty {
+                ContentUnavailableView("All categorized", systemImage: "checkmark.circle")
+            } else {
+                List(uncategorized) { transaction in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(transaction.merchant.isEmpty ? "Transaction" : transaction.merchant)
+                            Text(transaction.date, format: .dateTime.day().month().year())
+                                .font(.subheadline).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text(transaction.amount, format: .currency(code: transaction.currency))
+                        Menu("Assign") {
+                            ForEach(Budgets.ordered(categories)) { category in
+                                Button { assign(transaction, to: category) } label: { category.label }
+                            }
+                        }
+                        .fixedSize()
+                    }
+                    .listRowBackground(Color(theme.surface))
+                }
+            }
+        }
+        .navigationTitle("Uncategorized")
+        .themedBackground()
+        .confirmationDialog(Text("Apply \(applying?.name ?? "") to \(applying?.count ?? 0) more from \(applying?.merchant ?? "")?"),
+                            isPresented: Binding(get: { applying != nil }, set: { if !$0 { applying = nil } }),
+                            titleVisibility: .visible, presenting: applying) { item in
+            Button("Apply to All") {
+                _ = Categorizer.applyToAll(merchant: item.merchant, category: item.category, context: modelContext)
+                Task { await Budgets.checkAlerts(for: item.category, on: .now, context: modelContext) }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+    }
+
+    private func assign(_ transaction: Transaction, to category: Category) {
+        let merchant = transaction.merchant.trimmingCharacters(in: .whitespacesAndNewlines)
+        transaction.category = category
+        transaction.categoryIsAuto = false
+        if !merchant.isEmpty { Categorizer.learn(merchant, category: category) }
+        try? modelContext.save()
+        let date = transaction.date
+        Task { await Budgets.checkAlerts(for: category, on: date, context: modelContext) }
+        guard !merchant.isEmpty else { return }
+        let key = Categorizer.normalize(merchant)
+        let count = transactions.filter {
+            ($0.category == nil || $0.categoryIsAuto) && Categorizer.normalize($0.merchant) == key && $0.category !== category
+        }.count
+        if count > 0 { applying = (category, category.name, merchant, count) }
     }
 }
 

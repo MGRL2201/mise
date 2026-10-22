@@ -12,7 +12,7 @@ struct Backup: Codable {
                                 "travel.transport", "travel.buffer", "planning.workStart", "planning.workEnd", "planning.workDays",
                                 "planning.daily", "planning.dailyTime",
                                 "planning.weekly", "planning.weeklyDay", "planning.weeklyTime", "wake.phrase",
-                                "finance.homeCurrency"]
+                                "finance.homeCurrency", "finance.merchantRules"]
 
     var version: Int
     var createdAt: Date
