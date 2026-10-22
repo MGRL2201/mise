@@ -50,8 +50,9 @@ enum Goals {
                               calendar: Calendar = .current) -> Decimal? {
         guard let date else { return nil }
         guard saved < target else { return 0 }
-        let whole = calendar.dateComponents([.month], from: now, to: date).month ?? 0
-        let partial = calendar.date(byAdding: .month, value: whole, to: now)! < date
+        let start = calendar.startOfDay(for: now), end = calendar.startOfDay(for: date)
+        let whole = calendar.dateComponents([.month], from: start, to: end).month ?? 0
+        let partial = calendar.date(byAdding: .month, value: whole, to: start)! < end
         var perMonth = (target - saved) / Decimal(max(whole + (partial ? 1 : 0), 1))
         var rounded = Decimal()
         NSDecimalRound(&rounded, &perMonth, 2, .up)

@@ -13,8 +13,8 @@ struct GoalsTests {
         return calendar
     }()
 
-    func date(_ year: Int, _ month: Int, _ day: Int) -> Date {
-        calendar.date(from: DateComponents(year: year, month: month, day: day, hour: 9))!
+    func date(_ year: Int, _ month: Int, _ day: Int, hour: Int = 9) -> Date {
+        calendar.date(from: DateComponents(year: year, month: month, day: day, hour: hour))!
     }
 
     func needed(saved: Decimal = 400, by date: Date?) -> Decimal? {
@@ -29,6 +29,11 @@ struct GoalsTests {
         #expect(needed(by: date(2026, 1, 25)) == 600)
         #expect(needed(saved: 1000, by: date(2026, 7, 15)) == 0)
         #expect(needed(by: nil) == nil)
+        // Time of day is ignored: same day-of-month, target later in the day, is still 6 months.
+        #expect(needed(by: date(2026, 7, 15, hour: 10)) == 100)
+        // Jan 31 → Feb 28 is one month.
+        #expect(Goals.monthlyNeeded(saved: 400, target: 1000, by: date(2026, 2, 28), now: date(2026, 1, 31),
+                                    calendar: calendar) == 600)
     }
 
     @Test func fraction() {
