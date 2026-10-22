@@ -263,7 +263,7 @@ struct AccountEditor: View {
                         ForEach(AccountType.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
                     }
                     CurrencyPicker(title: "Currency", selection: $currency)
-                        .disabled(live != nil && !canDelete)
+                        .disabled(live != nil && (!canDelete || !(live?.goals ?? []).isEmpty))
                     TextField("Opening balance", text: $opening)
                         #if os(iOS)
                         .keyboardType(.numbersAndPunctuation)

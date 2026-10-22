@@ -40,18 +40,21 @@ struct GoalsView: View {
     private func row(_ goal: Goal) -> some View {
         let saved = Goals.saved(goal, rates: rates)
         let reached = saved >= goal.target
+        let code = goal.account?.currency ?? goal.currency
         var caption: [String] = []
         if reached {
             caption.append("Reached")
+        } else if let date = goal.targetDate, date < Calendar.current.startOfDay(for: .now) {
+            caption.append("Overdue · \((goal.target - saved).formatted(.currency(code: code))) left")
         } else if let date = goal.targetDate,
                   let monthly = Goals.monthlyNeeded(saved: saved, target: goal.target, by: date) {
-            caption.append("By \(date.formatted(.dateTime.day().month().year())) · \(monthly.formatted(.currency(code: goal.currency)))/month")
+            caption.append("By \(date.formatted(.dateTime.day().month().year())) · \(monthly.formatted(.currency(code: code)))/month")
         }
         if let account = goal.account { caption.append("From \(account.name)") }
         return Button { editing = goal } label: {
             VStack(alignment: .leading, spacing: 4) {
                 Text(goal.name)
-                Text("\(saved.formatted(.currency(code: goal.currency))) of \(goal.target.formatted(.currency(code: goal.currency)))")
+                Text("\(saved.formatted(.currency(code: code))) of \(goal.target.formatted(.currency(code: code)))")
                     .font(.subheadline).foregroundStyle(.secondary)
                 ProgressView(value: Goals.fraction(saved: saved, target: goal.target))
                     .tint(reached ? Color.green : nil)
@@ -97,7 +100,7 @@ struct GoalEditor: View {
         self.goal = goal
         _name = State(initialValue: goal?.name ?? "")
         _target = State(initialValue: goal.map { Accounts.plain($0.target) } ?? "")
-        _currency = State(initialValue: goal?.currency ?? FX.home())
+        _currency = State(initialValue: goal?.account?.currency ?? goal?.currency ?? FX.home())
         _hasDate = State(initialValue: goal?.targetDate != nil)
         _targetDate = State(initialValue: goal?.targetDate ?? Calendar.current.date(byAdding: .year, value: 1, to: .now)!)
         _account = State(initialValue: goal?.account)
