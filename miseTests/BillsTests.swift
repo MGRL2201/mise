@@ -1,9 +1,12 @@
 import Testing
+import SwiftData
 import Foundation
 @testable import mise
 
 @MainActor
 struct BillsTests {
+    let container = try! ModelContainer(for: Schema(Storage.models), configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+    var context: ModelContext { container.mainContext }
     let calendar: Calendar = {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "UTC")!
@@ -58,5 +61,63 @@ struct BillsTests {
         #expect(Bills.isOverdue(date(2027, 5, 9, hour: 23), now: now, calendar: calendar))
         #expect(!Bills.isOverdue(date(2027, 5, 10, hour: 1), now: now, calendar: calendar))
         #expect(!Bills.isOverdue(date(2027, 5, 11, hour: 1), now: now, calendar: calendar))
+    }
+
+    func bill(due: Date, remindDays: Int = 3) -> Bill {
+        let bill = Bill(name: "Netflix", amount: Decimal(string: "15.98")!, currency: "SGD", nextDue: due)
+        bill.remindDays = remindDays
+        return bill
+    }
+
+    func reminders(_ bills: [Bill], now: Date) -> [(id: String, date: Date, body: String)] {
+        Bills.reminders(for: bills, now: now, calendar: calendar)
+    }
+
+    @Test func remindersBeforeAndDue() {
+        let b = bill(due: date(2027, 5, 20, hour: 18))
+        let result = reminders([b], now: date(2027, 5, 10, hour: 12))
+        #expect(result.map(\.id) == ["bill|\(b.id.uuidString)|before", "bill|\(b.id.uuidString)|due"])
+        #expect(result.map(\.date) == [date(2027, 5, 17), date(2027, 5, 20)])
+        #expect(result[0].body.hasPrefix("Netflix: ") && result[0].body.hasSuffix(" due in 3 days"))
+        #expect(result[1].body.hasSuffix(" due today"))
+    }
+
+    @Test func remindersSkipZeroInactivePastAndOverdue() {
+        let now = date(2027, 5, 10, hour: 12)
+        let zero = bill(due: date(2027, 5, 20), remindDays: 0)
+        #expect(reminders([zero], now: now).map(\.id) == ["bill|\(zero.id.uuidString)|due"])
+        let inactive = bill(due: date(2027, 5, 20))
+        inactive.active = false
+        #expect(reminders([inactive], now: now).isEmpty)
+        let tomorrow = bill(due: date(2027, 5, 11))
+        #expect(reminders([tomorrow], now: now).map(\.id) == ["bill|\(tomorrow.id.uuidString)|due"])
+        #expect(reminders([bill(due: date(2027, 5, 9))], now: now).isEmpty)
+    }
+
+    @Test func markPaidRecordsTransactionAndAdvances() {
+        let account = Account(name: "DBS", type: .debit, currency: "SGD")
+        let category = mise.Category(name: "Subscriptions")
+        context.insert(account)
+        context.insert(category)
+        let b = bill(due: date(2027, 1, 31))
+        context.insert(b)
+        b.account = account
+        b.category = category
+        b.anchorDay = 31
+        let now = date(2027, 1, 30)
+        let paid = Bills.markPaid(b, context: context, now: now, calendar: calendar)
+        #expect(paid.amount == Decimal(string: "-15.98")!)
+        #expect(paid.currency == "SGD")
+        #expect(paid.merchant == "Netflix")
+        #expect(paid.account === account)
+        #expect(paid.category === category)
+        #expect(paid.source == .manual)
+        #expect(!paid.categoryIsAuto)
+        #expect(paid.homeAmount == nil)
+        #expect(paid.date == now)
+        #expect(b.nextDue == date(2027, 2, 28))
+        _ = Bills.markPaid(b, context: context, now: now, calendar: calendar)
+        #expect(b.nextDue == date(2027, 3, 31))
+        #expect(((try? context.fetch(FetchDescriptor<mise.Transaction>())) ?? []).count == 2)
     }
 }

@@ -47,6 +47,7 @@ struct MiseApp: App {
                         Task { await TravelTime.refresh(store: calendar, prompt: true) }
                         Task { await DailyPlanning.sync(prompt: false) }
                         Task { await WeeklyReview.sync(prompt: false) }
+                        Task { await Bills.sync(context: container.mainContext, prompt: false) }
                         #if os(iOS)
                         Self.recordSpikeLaunch()
                         Task { await WakeAlarms.sync((try? container.mainContext.fetch(FetchDescriptor<WakeAlarm>())) ?? []) }
