@@ -276,10 +276,31 @@ extension BackupTests {
     @Test func backupWithoutFinanceLeavesAccountsAlone() throws {
         let target = try freshStore()
         target.context.insert(Account(name: "Kept", type: .cash, currency: "SGD"))
+        target.context.insert(NetWorthSnapshot(date: .now, total: 5, currency: "SGD"))
         try target.context.save()
         let settings = try PropertyListSerialization.data(fromPropertyList: [String: Any](), format: .binary, options: 0)
         let json = #"{"version":2,"createdAt":0,"attachments":[],"settings":"\#(settings.base64EncodedString())","tags":[],"taskExtras":[]}"#
         try restore(Data(json.utf8), into: target)
         #expect(try target.context.fetch(FetchDescriptor<Account>()).map(\.name) == ["Kept"])
+        #expect(try target.context.fetch(FetchDescriptor<NetWorthSnapshot>()).map(\.total) == [5])
+    }
+
+    @Test func netWorthSnapshotsRoundTripAndReplaceStale() throws {
+        let source = try freshStore()
+        let snapshot = NetWorthSnapshot(date: Date(timeIntervalSince1970: 1_800_000_000),
+                                        total: Decimal(string: "1234.56")!, currency: "SGD")
+        source.context.insert(snapshot)
+        try source.context.save()
+
+        let target = try freshStore()
+        target.context.insert(NetWorthSnapshot(date: .now, total: 1, currency: "USD"))
+        try target.context.save()
+        try restore(try export(source), into: target)
+
+        let snapshots = try target.context.fetch(FetchDescriptor<NetWorthSnapshot>())
+        let copy = try #require(snapshots.first)
+        #expect(snapshots.count == 1)
+        #expect(copy.id == snapshot.id && copy.date == snapshot.date)
+        #expect(copy.total == Decimal(string: "1234.56") && copy.currency == "SGD")
     }
 }
