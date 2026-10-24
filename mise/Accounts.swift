@@ -126,6 +126,30 @@ extension Accounts {
         housing.sortOrder = 4
         context.insert(housing)
         let today = Calendar.current.startOfDay(for: .now)
+        // Reports history: salary plus 3-5 outflows in each of the previous 5 months.
+        for back in 1...5 {
+            let start = Calendar.current.date(byAdding: .month, value: -back, to: monthStart)!
+            let rows: [(String, Category, Int, Int)] = [
+                ("Salary", income, 5200, 25), ("FairPrice", groceries, -(320 + 45 * back), 6),
+                ("Rent", housing, -2400, 1), ("Grab", transport, -(95 + 17 * back), 12),
+                ("Din Tai Fung", dining, -(180 - 20 * back), 18), ("Cold Storage", groceries, -(60 + 11 * back), 22),
+            ]
+            for (merchant, category, amount, dayOfMonth) in rows.prefix(4 + back % 3) {
+                let transaction = Transaction(amount: Decimal(amount), currency: "SGD",
+                                              date: start + Double(dayOfMonth - 1) * day + 10 * 3_600)
+                transaction.merchant = merchant
+                transaction.account = dbs
+                transaction.category = category
+                context.insert(transaction)
+            }
+        }
+        // Net worth every 3 days for ~400 days ending today: rising, with a wave and a dip around day 250.
+        for ago in stride(from: 399, through: 0, by: -3) {
+            let t = Double(399 - ago)
+            let total = 14_000 + t * 18 + 600 * sin(t / 25) - 1_800 * exp(-pow((t - 250) / 25, 2))
+            context.insert(NetWorthSnapshot(date: Calendar.current.date(byAdding: .day, value: -ago, to: .now)!,
+                                            total: Decimal(Int(total)), currency: "SGD"))
+        }
         let bills: [(String, String, String, Account, Category?, BillCadence, Int, Int, Int, Bool)] = [
             // name, amount, currency, account, category, cadence, interval, due in days, remind days, active
             ("Rent", "2400", "SGD", dbs, housing, .monthly, 1, -1, 3, true),

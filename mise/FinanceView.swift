@@ -20,6 +20,7 @@ struct FinanceView: View {
     @State private var showingBudgets = false
     @State private var showingBills = false
     @State private var showingGoals = false
+    @State private var showingReports = false
     @State private var showingUncategorized = false
     #if os(iOS)
     @State private var showingApplePay = false
@@ -61,6 +62,7 @@ struct FinanceView: View {
         .navigationDestination(isPresented: $showingBudgets) { BudgetsView() }
         .navigationDestination(isPresented: $showingBills) { BillsView() }
         .navigationDestination(isPresented: $showingGoals) { GoalsView() }
+        .navigationDestination(isPresented: $showingReports) { ReportsView() }
         .navigationDestination(isPresented: $showingUncategorized) { UncategorizedView() }
         #if os(iOS)
         .navigationDestination(isPresented: $showingApplePay) { ApplePaySettingsView() }
@@ -75,7 +77,7 @@ struct FinanceView: View {
         .onAppear {
             if accounts.isEmpty && !confirmed { askHome = true }
             #if DEBUG
-            // Screenshot hook: `-miseMoney transaction|transfer|all|budgets|bills|goals|uncategorized|applepay`, once per launch.
+            // Screenshot hook: `-miseMoney transaction|transfer|all|budgets|bills|goals|reports|uncategorized|applepay`, once per launch.
             if !debugOpened {
                 debugOpened = true
                 switch UserDefaults.standard.string(forKey: "miseMoney") {
@@ -85,6 +87,7 @@ struct FinanceView: View {
                 case "budgets": showingBudgets = true
                 case "bills": showingBills = true
                 case "goals": showingGoals = true
+                case "reports": showingReports = true
                 case "uncategorized": showingUncategorized = true
                 #if os(iOS)
                 case "applepay": showingApplePay = true
@@ -144,6 +147,7 @@ struct FinanceView: View {
                 NavigationLink("Budgets") { BudgetsView() }
                 NavigationLink("Bills") { BillsView() }
                 NavigationLink("Goals") { GoalsView() }
+                NavigationLink("Reports") { ReportsView() }
                 #if os(iOS)  // Shortcuts Transaction automations are iPhone-only; settings live in local UserDefaults
                 NavigationLink("Apple Pay") { ApplePaySettingsView() }
                 #endif
