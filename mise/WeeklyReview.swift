@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 @preconcurrency import EventKit
 import UserNotifications
 
@@ -65,12 +66,16 @@ enum WeeklyReview {
     }
 }
 
-/// The last 7 days (completed tasks, time per calendar) and the next 7 days' open tasks.
+/// The last 7 days (completed tasks, time per calendar, spend) and the next 7 days' open tasks.
 struct WeeklyReviewView: View {
     @Environment(RemindersStore.self) private var reminders
     @Environment(CalendarStore.self) private var calendarStore
     @Environment(\.dismiss) private var dismiss
     @State private var planning = false
+    @Query private var transactions: [Transaction]
+    @Query private var categories: [Category]
+    @State private var rates = FXRates()
+    @AppStorage(FX.homeKey) private var home = FX.home()
 
     var body: some View {
         NavigationStack {
@@ -82,6 +87,7 @@ struct WeeklyReviewView: View {
                 .themedBackground()
                 .sheet(isPresented: $planning) { PlanningView(week: true) }
                 .task { await reminders.refresh() }  // opened from a notification before Tasks ever loaded
+                .task { rates = .load() }
         }
     }
 
@@ -108,7 +114,7 @@ struct WeeklyReviewView: View {
 
             Section("Time by calendar") { timeByCalendar(window) }
 
-            // Spend: add a Section here with the week's spending once Finance lands (SPEC §6.4).
+            Section("Spend") { spend(window) }
 
             Section("Next 7 days") {
                 if !reminders.hasAccess {
@@ -122,6 +128,32 @@ struct WeeklyReviewView: View {
                 }
                 Button("Plan Next Week", systemImage: "calendar.badge.plus") { planning = true }
                     .disabled(!reminders.hasAccess)
+            }
+        }
+    }
+
+    @ViewBuilder private func spend(_ window: DateInterval) -> some View {
+        let spent = Budgets.spent(transactions, in: window, rates: rates, home: home)
+        let top = Reports.categoryTotals(spent, categories: categories).prefix(3)
+        let unconverted = spent.unconverted.filter { $0.value != 0 }.sorted { $0.key < $1.key }
+        if top.isEmpty && unconverted.isEmpty {
+            Text("No spending.").foregroundStyle(.secondary)
+        } else {
+            LabeledContent("Total", value: Finance.homeSpend(transactions, in: window, rates: rates, home: home).total,
+                           format: .currency(code: home))
+            ForEach(top, id: \.name) { row in
+                LabeledContent {
+                    Text(row.amount, format: .currency(code: home))
+                } label: {
+                    Label {
+                        Text(row.name)
+                    } icon: {
+                        Image(systemName: "circle.fill").foregroundStyle(Category.tint(row.color))
+                    }
+                }
+            }
+            ForEach(unconverted, id: \.key) { code, amount in
+                Text("\(amount.formatted(.currency(code: code))) (no rate)").foregroundStyle(.secondary)
             }
         }
     }
