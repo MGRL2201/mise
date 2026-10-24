@@ -146,9 +146,9 @@ extension Accounts {
         // Net worth every 3 days for ~400 days ending today: rising, with a wave and a dip around day 250.
         for ago in stride(from: 399, through: 0, by: -3) {
             let t = Double(399 - ago)
-            let total = 14_000 + t * 18 + 600 * sin(t / 25) - 1_800 * exp(-pow((t - 250) / 25, 2))
+            let total = 29_000 + t * 18 + 600 * sin(t / 25) - 1_800 * exp(-pow((t - 250) / 25, 2))
             context.insert(NetWorthSnapshot(date: Calendar.current.date(byAdding: .day, value: -ago, to: .now)!,
-                                            total: Decimal(Int(total)), currency: "SGD"))
+                                            total: Decimal(Int(total)), currency: FX.home()))
         }
         let bills: [(String, String, String, Account, Category?, BillCadence, Int, Int, Int, Bool)] = [
             // name, amount, currency, account, category, cadence, interval, due in days, remind days, active
@@ -176,7 +176,7 @@ extension Accounts {
             goal.targetDate = months.flatMap { Calendar.current.date(byAdding: .month, value: $0, to: today) }
             return goal
         }
-        goal("Emergency fund", 10_000, "SGD", months: 12).account = dbs
+        goal("Emergency fund", 25_000, "SGD", months: 12).account = dbs
         goal("Japan trip", 3_000, "SGD", months: 6).contributions = [(500, 60), (400, 30), (350, 5)]
             .map { GoalContribution(amount: Decimal($0.0), date: .now - Double($0.1) * day) }
         goal("New laptop", 2_500, "USD", months: nil).contributions = [GoalContribution(amount: 300, date: .now - 10 * day)]
