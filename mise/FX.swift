@@ -120,6 +120,7 @@ enum FX {
     /// Only networked entry point. Offline/errors are swallowed — the cache
     /// simply doesn't advance and we retry next call. When offline, same-
     /// currency transactions still get filled from the existing cache.
+    /// Also records today's net worth snapshot (covers app-active and post-save).
     @MainActor
     static func refresh(context: ModelContext, now: Date = .now) async {
         var cache = FXRates.load()
@@ -154,6 +155,7 @@ enum FX {
         cache.save()
         fill(pending, rates: cache, home: home())
         try? context.save()
+        Reports.recordNetWorth(context: context, rates: cache, home: home(), now: now)
     }
 
     @MainActor

@@ -33,6 +33,8 @@ struct Backup: Codable {
     var bills: [BillRecord]?
     /// Optional: files before #39 lack them.
     var goals: [GoalRecord]?
+    /// Optional: files before #40 lack them.
+    var netWorthSnapshots: [NetWorthSnapshotRecord]?
 
     struct AccountRecord: Codable {
         var id: UUID
@@ -107,6 +109,13 @@ struct Backup: Codable {
         var accountID: UUID?
         var contributions: [GoalContribution]
         var createdAt: Date
+    }
+
+    struct NetWorthSnapshotRecord: Codable {
+        var id: UUID
+        var date: Date
+        var total: Decimal
+        var currency: String
     }
 
     struct WakeAlarmRecord: Codable {
@@ -204,6 +213,9 @@ enum BackupService {
                               targetDate: $0.targetDate, accountID: $0.account?.id,
                               contributions: $0.contributions, createdAt: $0.createdAt)
         }
+        let netWorthSnapshots = try context.fetch(FetchDescriptor<NetWorthSnapshot>()).map {
+            Backup.NetWorthSnapshotRecord(id: $0.id, date: $0.date, total: $0.total, currency: $0.currency)
+        }
         var settings: [String: Any] = [:]
         for key in Backup.settingsKeys { settings[key] = defaults.object(forKey: key) }
         return try JSONEncoder().encode(Backup(
@@ -211,7 +223,7 @@ enum BackupService {
             settings: PropertyListSerialization.data(fromPropertyList: settings, format: .binary, options: 0),
             tags: tags, taskExtras: taskExtras, wakeAlarms: wakeAlarms, wakeLogs: wakeLogs,
             accounts: accounts, categories: categories, transactions: transactions, transfers: transfers,
-            bills: bills, goals: goals))
+            bills: bills, goals: goals, netWorthSnapshots: netWorthSnapshots))
     }
 
     static func restore(_ data: Data, context: ModelContext, files: AttachmentFileStore, defaults: UserDefaults) throws {
@@ -348,6 +360,14 @@ enum BackupService {
                     goal.createdAt = record.createdAt
                     context.insert(goal)
                     goal.account = record.accountID.flatMap { accounts[$0] }
+                }
+            }
+            if let snapshots = backup.netWorthSnapshots {
+                try context.fetch(FetchDescriptor<NetWorthSnapshot>()).forEach(context.delete)
+                for record in snapshots {
+                    let snapshot = NetWorthSnapshot(date: record.date, total: record.total, currency: record.currency)
+                    snapshot.id = record.id
+                    context.insert(snapshot)
                 }
             }
             try context.save()
