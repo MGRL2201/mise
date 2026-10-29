@@ -133,6 +133,12 @@ struct TransactionExtractionTests {
         #expect(fields.currency == currency)
     }
 
+    /// Fullwidth (Japanese OCR) and Arabic-Indic digits must not trap the date regexes' Int parse.
+    @Test func prepassNonASCIIDigits() {
+        let fields = TransactionExtraction.prepass("２０２６/１０/２０\n٢٠/١٠/٢٠٢٦\nTOTAL 44.46", now: now, calendar: Self.calendar)
+        #expect(fields.total == Decimal(string: "44.46"))
+    }
+
     @Test func chunks() {
         let text = (1...300).map { "LINE \($0) ITEM            \($0).99" }.joined(separator: "\n")
             + "\n" + String(repeating: "x", count: 5_000) + "\nTOTAL 44.46"

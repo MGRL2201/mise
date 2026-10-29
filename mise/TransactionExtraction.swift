@@ -80,8 +80,8 @@ enum TransactionExtraction {
         }
     }
 
-    private static let isoDate = try! NSRegularExpression(pattern: #"(?<!\d)(\d{4})([-/])(\d{1,2})\2(\d{1,2})(?!\d)"#)
-    private static let numericDate = try! NSRegularExpression(pattern: #"(?<![\dA-Za-z.])(\d{1,2})([-/.])(\d{1,2})\2(\d{4}|\d{2})(?!\d)"#)
+    private static let isoDate = try! NSRegularExpression(pattern: #"(?<![0-9])([0-9]{4})([-/])([0-9]{1,2})\2([0-9]{1,2})(?![0-9])"#)
+    private static let numericDate = try! NSRegularExpression(pattern: #"(?<![0-9A-Za-z.])([0-9]{1,2})([-/.])([0-9]{1,2})\2([0-9]{4}|[0-9]{2})(?![0-9])"#)
     private static let detector = try! NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue)
 
     /// Valid date candidates in text order, at noon in `calendar` (time of day unused; noon avoids day shifts).
@@ -115,6 +115,7 @@ enum TransactionExtraction {
 extension TransactionExtraction {
     /// Entry point for #45/#46/#47. Never throws, never blocks: model unavailable or erroring (guardrail, ModelManagerError)
     /// -> pre-pass only. Blank text -> []. One transaction per text; callers split per document/page as they need.
+    /// A non-empty result doesn't mean a transaction was found: amount 0 = no total.
     @MainActor static func extract(_ text: String, categories: [Category], fallbackCurrency: String = FX.home(),
                                    now: Date = .now, defaults: UserDefaults = .standard,
                                    modelAvailable: Bool = OnDeviceAI.unavailableReason == nil) async -> [DraftTransaction] {
