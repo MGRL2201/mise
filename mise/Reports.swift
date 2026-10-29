@@ -25,7 +25,7 @@ enum Reports {
               let accounts = try? context.fetch(FetchDescriptor<Account>()), !accounts.isEmpty
         else { return }
         let total = Accounts.netWorth(
-            accounts.map { (Finance.balance(of: $0, rates: rates), $0.currency) },
+            Holdings.worth(accounts, rates: rates),
             rates: rates, home: home, today: now
         ).total
         let day = calendar.dateInterval(of: .day, for: now)!

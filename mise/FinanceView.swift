@@ -218,7 +218,7 @@ struct FinanceView: View {
         let archived = accounts.filter(\.archived)
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         let worth = Accounts.netWorth(
-            accounts.map { (amount: Finance.balance(of: $0, rates: rates), currency: $0.currency) },
+            Holdings.worth(accounts, rates: rates),
             rates: rates, home: home
         )
         let interval = Calendar.current.dateInterval(of: .month, for: month)!
