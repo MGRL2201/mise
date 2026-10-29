@@ -25,6 +25,7 @@ struct FinanceView: View {
     @State private var showingReports = false
     @State private var showingSummary = false
     @State private var showingUncategorized = false
+    @State private var showingReview = false
     #if os(iOS)
     @State private var showingApplePay = false
     #endif
@@ -68,6 +69,9 @@ struct FinanceView: View {
         .navigationDestination(isPresented: $showingReports) { ReportsView() }
         .navigationDestination(isPresented: $showingSummary) { MonthSummaryView(month: .now) }
         .navigationDestination(isPresented: $showingUncategorized) { UncategorizedView() }
+        .sheet(isPresented: $showingReview) {
+            TransactionReviewView(drafts: TransactionReview.sampleDrafts(accounts: accounts), source: TransactionReview.sampleSource())
+        }
         #if os(iOS)
         .navigationDestination(isPresented: $showingApplePay) { ApplePaySettingsView() }
         #endif
@@ -83,7 +87,7 @@ struct FinanceView: View {
         .onAppear {
             if accounts.isEmpty && !confirmed { askHome = true }
             #if DEBUG
-            // Screenshot hook: `-miseMoney transaction|transfer|all|budgets|bills|goals|reports|summary|uncategorized|applepay`, once per launch.
+            // Screenshot hook: `-miseMoney transaction|transfer|all|budgets|bills|goals|reports|summary|uncategorized|review|applepay`, once per launch.
             if !debugOpened {
                 debugOpened = true
                 switch UserDefaults.standard.string(forKey: "miseMoney") {
@@ -96,6 +100,7 @@ struct FinanceView: View {
                 case "reports": showingReports = true
                 case "summary": showingSummary = true
                 case "uncategorized": showingUncategorized = true
+                case "review": showingReview = true
                 #if os(iOS)
                 case "applepay": showingApplePay = true
                 #endif
