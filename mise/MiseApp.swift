@@ -17,9 +17,13 @@ struct MiseApp: App {
     @Environment(\.scenePhase) private var phase
 
     init() {
+        #if DEBUG
+        let container = Storage.inMemory ? Self.seededContainer() : Storage.makeContainer()
+        #else
         let container = Storage.makeContainer()
+        #endif
         self.container = container
-        AppDependencyManager.shared.add(dependency: container)  // CompleteTaskIntent
+        AppDependencyManager.shared.add(dependency: container)  // CompleteTaskIntent, LogTransactionIntent, alarm intents
         let store = EKEventStore()  // one store per app (Apple guidance)
         _reminders = State(initialValue: RemindersStore(eventStore: store, context: container.mainContext))
         _calendar = State(initialValue: CalendarStore(eventStore: store))
@@ -39,11 +43,16 @@ struct MiseApp: App {
                     switch phase {
                     case .active:
                         AutoBackup.run(context: container.mainContext)
+                        Task { await FX.refresh(context: container.mainContext) }
                         Task { await TravelTime.refresh(store: calendar, prompt: true) }
                         Task { await DailyPlanning.sync(prompt: false) }
                         Task { await WeeklyReview.sync(prompt: false) }
+                        Task { await Bills.sync(context: container.mainContext, prompt: false) }
+                        Task { await MonthSummary.sync(prompt: false) }
                         #if os(iOS)
                         Self.recordSpikeLaunch()
+                        Task { await WakeAlarms.sync((try? container.mainContext.fetch(FetchDescriptor<WakeAlarm>())) ?? []) }
+                        if WakePending.current() != nil { WakePrompt.shared.show() }
                         #endif
                     #if os(iOS)
                     case .background:
@@ -68,6 +77,15 @@ struct MiseApp: App {
         }
         #endif
     }
+
+    /// DEBUG `-miseSeedFinance YES`: in-memory sample data for screenshots; never touches the real store or backups.
+    #if DEBUG
+    private static func seededContainer() -> ModelContainer {
+        let container = try! ModelContainer(for: Schema(Storage.models), configurations: ModelConfiguration(schema: Schema(Storage.models), isStoredInMemoryOnly: true))
+        Accounts.seed(container.mainContext)
+        return container
+    }
+    #endif
 
     #if os(iOS)
     // ponytail: spike write for #10/#11; replace with real widget snapshot later

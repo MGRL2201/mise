@@ -74,6 +74,7 @@ enum AutoBackup {
 
     /// App trigger: never throws, records the outcome for Settings.
     static func run(context: ModelContext) {
+        guard !Storage.inMemory else { return }  // seeded sample data must never overwrite real backups
         do {
             _ = try runIfDue(context: context)
             UserDefaults.standard.removeObject(forKey: lastErrorKey)

@@ -3,7 +3,7 @@ import SwiftUI
 /// Every screen the app can navigate to. Shared by the iOS tab/More list, the
 /// Mac sidebar, and deep links (`mise://<destination>` or `.../new`).
 enum Destination: String, CaseIterable, Identifiable {
-    case today, tasks, calendar, money, notes, news, settings
+    case today, tasks, calendar, money, notes, news, wakeUp = "wakeup", settings
 
     var id: String { rawValue }
 
@@ -15,6 +15,7 @@ enum Destination: String, CaseIterable, Identifiable {
         case .money: "Money"
         case .notes: "Notes"
         case .news: "News"
+        case .wakeUp: "Wake-up"
         case .settings: "Settings"
         }
     }
@@ -27,6 +28,7 @@ enum Destination: String, CaseIterable, Identifiable {
         case .money: "dollarsign.circle"
         case .notes: "note.text"
         case .news: "newspaper"
+        case .wakeUp: "alarm"
         case .settings: "gear"
         }
     }
@@ -73,30 +75,49 @@ struct PlaceholderView: View {
 struct ContentView: View {
     static let title = "mise"
 
-    // The four fixed iOS tabs plus "more", which pushes notes/news/settings.
+    // The four fixed iOS tabs plus "more", which pushes notes/news/wake-up/settings.
     private enum MainTab: Hashable {
         case today, tasks, calendar, money, more
     }
 
-    private static let moreDestinations: [Destination] = [.notes, .news, .settings]
+    private static let moreDestinations: [Destination] = [.notes, .news, .wakeUp, .settings]
 
     @State private var tab: MainTab = .today
     @State private var morePath: [Destination] = []
     @State private var macSelection: Destination? = .today
     @Environment(AppLock.self) private var lock
     private let planning = PlanningPrompt.shared
+    private let billPrompt = BillPrompt.shared
+    private let summaryPrompt = MonthSummaryPrompt.shared
+    #if os(iOS)
+    @Bindable private var wake = WakePrompt.shared
+    #endif
+
+    /// macOS holds sheets back while the whole app is locked (an attached sheet
+    /// blocks the main window's lock overlay). iOS covers sheets with the lock window,
+    /// but holds them while the wake-up cover is up (a sheet blocks presenting it).
+    private var holdSheets: Bool {
+        #if os(macOS)
+        lock.mode == .wholeApp && !lock.isUnlocked
+        #else
+        wake.isPresented
+        #endif
+    }
 
     var body: some View {
         root
-            // Held back while the whole app is locked: a sheet would sit above the lock overlay.
-            .sheet(isPresented: Binding { planning.isPresented && !(lock.mode == .wholeApp && !lock.isUnlocked) }
-                   set: { planning.isPresented = $0 }) { PlanningView() }
-            .sheet(isPresented: Binding { planning.isWeeklyReviewPresented && !(lock.mode == .wholeApp && !lock.isUnlocked) }
-                   set: { planning.isWeeklyReviewPresented = $0 }) { WeeklyReviewView() }
+            .sheet(isPresented: Binding { planning.isPresented && !holdSheets }
+                   set: { if !holdSheets { planning.isPresented = $0 } }) { PlanningView() }
+            .sheet(isPresented: Binding { planning.isWeeklyReviewPresented && !holdSheets }
+                   set: { if !holdSheets { planning.isWeeklyReviewPresented = $0 } }) { WeeklyReviewView() }
+            #if os(iOS)
+            .fullScreenCover(isPresented: $wake.isPresented) { WakeConfirmView() }
+            #endif
             #if DEBUG
             .onAppear {
                 if UserDefaults.standard.bool(forKey: "misePlanning") { planning.showDaily() }
                 if UserDefaults.standard.bool(forKey: "miseWeeklyReview") { planning.showWeekly() }
+                if UserDefaults.standard.bool(forKey: "miseWakeConfirm") { WakePrompt.shared.show() }
             }
             #endif
     }
@@ -124,6 +145,13 @@ struct ContentView: View {
         #if DEBUG
         .onAppear { if let debugTab { macSelection = debugTab } }
         #endif
+        // Bill reminder tap: FinanceView pushes Bills (after unlock if Money is locked).
+        .onChange(of: billPrompt.isPresented, initial: true) { _, shown in if shown { macSelection = .money } }
+        .onChange(of: summaryPrompt.month != nil, initial: true) { _, shown in if shown { macSelection = .money } }
+        // Leaving Money drops a pending/pushed Bills/summary so the next reminder tap fires onChange again.
+        .onChange(of: macSelection) { _, new in
+            if new != .money { billPrompt.isPresented = false; summaryPrompt.month = nil }
+        }
         #else
         TabView(selection: $tab) {
             Tab("Today", systemImage: Destination.today.systemImage, value: .today) {
@@ -162,6 +190,11 @@ struct ContentView: View {
         #if DEBUG
         .onAppear { if let debugTab { select(debugTab) } }
         #endif
+        .onChange(of: billPrompt.isPresented, initial: true) { _, shown in if shown { select(.money) } }
+        .onChange(of: summaryPrompt.month != nil, initial: true) { _, shown in if shown { select(.money) } }
+        .onChange(of: tab) { _, new in
+            if new != .money { billPrompt.isPresented = false; summaryPrompt.month = nil }
+        }
         #endif
     }
 
@@ -178,9 +211,18 @@ struct ContentView: View {
                 TasksView()
             } else if destination == .calendar {
                 CalendarView()
+            } else if destination == .wakeUp {
+                WakeUpView()
             } else if destination == .money && lock.mode == .financeAndNotes && !lock.isUnlocked {
                 // ponytail: Notes isn't gated; per-note lock (Phase 5, SPEC §6.5) will reuse AppLock.isUnlocked.
                 LockView()
+            } else if destination == .money {
+                #if os(macOS)
+                // Mac detail column has no NavigationStack; account rows push onto this one.
+                NavigationStack { FinanceView() }
+                #else
+                FinanceView()
+                #endif
             } else {
                 PlaceholderView(destination: destination)
             }
@@ -198,7 +240,7 @@ struct ContentView: View {
         case .tasks: tab = .tasks
         case .calendar: tab = .calendar
         case .money: tab = .money
-        case .notes, .news, .settings:
+        case .notes, .news, .wakeUp, .settings:
             tab = .more
             morePath = [destination]
         }

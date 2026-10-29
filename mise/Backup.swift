@@ -11,7 +11,9 @@ struct Backup: Codable {
     static let settingsKeys = ["theme.palette", "lock.mode", "lock.grace", "calendar.hidden", "calendar.colors", "calendar.default",
                                 "travel.transport", "travel.buffer", "planning.workStart", "planning.workEnd", "planning.workDays",
                                 "planning.daily", "planning.dailyTime",
-                                "planning.weekly", "planning.weeklyDay", "planning.weeklyTime"]
+                                "planning.weekly", "planning.weeklyDay", "planning.weeklyTime", "wake.phrase",
+                                "finance.homeCurrency", "finance.merchantRules", "finance.cardAccounts", "finance.applePayDefault",
+                                "finance.monthEnd", "finance.monthEndTime"]
 
     var version: Int
     var createdAt: Date
@@ -20,6 +22,117 @@ struct Backup: Codable {
     /// Added in version 2; nil in version-1 backups.
     var tags: [String]?
     var taskExtras: [TaskExtrasRecord]?
+    /// Optional: older v2 files lack them.
+    var wakeAlarms: [WakeAlarmRecord]?
+    var wakeLogs: [WakeLogRecord]?
+    /// Optional: files before #33 lack them.
+    var accounts: [AccountRecord]?
+    var categories: [CategoryRecord]?
+    var transactions: [TransactionRecord]?
+    var transfers: [TransferRecord]?
+    /// Optional: files before #38 lack them.
+    var bills: [BillRecord]?
+    /// Optional: files before #39 lack them.
+    var goals: [GoalRecord]?
+    /// Optional: files before #40 lack them.
+    var netWorthSnapshots: [NetWorthSnapshotRecord]?
+
+    struct AccountRecord: Codable {
+        var id: UUID
+        var name: String
+        var type: AccountType
+        var currency: String
+        var openingBalance: Decimal
+        var archived: Bool
+        var createdAt: Date
+    }
+
+    struct CategoryRecord: Codable {
+        var id: UUID
+        var name: String
+        var icon: String
+        var color: Int
+        /// Optional: files before #37 lack them.
+        var sortOrder: Int?
+        var budget: Decimal?
+        /// Optional: files before #39 lack it.
+        var isIncome: Bool?
+    }
+
+    struct TransactionRecord: Codable {
+        var id: UUID
+        var amount: Decimal
+        var currency: String
+        var date: Date
+        var merchant: String
+        var notes: String
+        var accountID: UUID?
+        var categoryID: UUID?
+        var categoryIsAuto: Bool
+        var attachmentID: UUID?
+        var source: TransactionSource
+        var homeAmount: Decimal?
+        var accountAmount: Decimal?
+    }
+
+    struct TransferRecord: Codable {
+        var id: UUID
+        var fromID: UUID?
+        var toID: UUID?
+        var amount: Decimal
+        var toAmount: Decimal
+        var date: Date
+        var notes: String
+    }
+
+    struct BillRecord: Codable {
+        var id: UUID
+        var name: String
+        var amount: Decimal
+        var currency: String
+        var accountID: UUID?
+        var categoryID: UUID?
+        var cadence: BillCadence
+        var interval: Int
+        var nextDue: Date
+        var anchorDay: Int
+        var remindDays: Int
+        var active: Bool
+        var createdAt: Date
+    }
+
+    struct GoalRecord: Codable {
+        var id: UUID
+        var name: String
+        var target: Decimal
+        var currency: String
+        var targetDate: Date?
+        var accountID: UUID?
+        var contributions: [GoalContribution]
+        var createdAt: Date
+    }
+
+    struct NetWorthSnapshotRecord: Codable {
+        var id: UUID
+        var date: Date
+        var total: Decimal
+        var currency: String
+    }
+
+    struct WakeAlarmRecord: Codable {
+        var id: UUID
+        var hour: Int
+        var minute: Int
+        var weekdays: [Int]
+        var isOn: Bool
+    }
+
+    struct WakeLogRecord: Codable {
+        var day: Date
+        var firstRing: Date
+        var reRings: Int
+        var outOfBed: Date?
+    }
 
     struct TaskExtrasRecord: Codable {
         var reminderID: String
@@ -65,12 +178,53 @@ enum BackupService {
                                     subtasks: $0.subtasks, tagNames: ($0.tags ?? []).map(\.name), eventID: $0.eventID,
                                     flagged: $0.flagged, estimateMinutes: $0.estimateMinutes)
         }
+        let wakeAlarms = try context.fetch(FetchDescriptor<WakeAlarm>()).map {
+            Backup.WakeAlarmRecord(id: $0.id, hour: $0.hour, minute: $0.minute, weekdays: $0.weekdays, isOn: $0.isOn)
+        }
+        let wakeLogs = try context.fetch(FetchDescriptor<WakeLog>()).map {
+            Backup.WakeLogRecord(day: $0.day, firstRing: $0.firstRing, reRings: $0.reRings, outOfBed: $0.outOfBed)
+        }
+        let accounts = try context.fetch(FetchDescriptor<Account>()).map {
+            Backup.AccountRecord(id: $0.id, name: $0.name, type: $0.type, currency: $0.currency,
+                                 openingBalance: $0.openingBalance, archived: $0.archived, createdAt: $0.createdAt)
+        }
+        let categories = try context.fetch(FetchDescriptor<Category>()).map {
+            Backup.CategoryRecord(id: $0.id, name: $0.name, icon: $0.icon, color: $0.color,
+                                  sortOrder: $0.sortOrder, budget: $0.budget, isIncome: $0.isIncome)
+        }
+        let transactions = try context.fetch(FetchDescriptor<Transaction>()).map {
+            Backup.TransactionRecord(id: $0.id, amount: $0.amount, currency: $0.currency, date: $0.date,
+                                     merchant: $0.merchant, notes: $0.notes, accountID: $0.account?.id,
+                                     categoryID: $0.category?.id, categoryIsAuto: $0.categoryIsAuto,
+                                     attachmentID: $0.attachmentID, source: $0.source, homeAmount: $0.homeAmount,
+                                     accountAmount: $0.accountAmount)
+        }
+        let transfers = try context.fetch(FetchDescriptor<Transfer>()).map {
+            Backup.TransferRecord(id: $0.id, fromID: $0.from?.id, toID: $0.to?.id, amount: $0.amount,
+                                  toAmount: $0.toAmount, date: $0.date, notes: $0.notes)
+        }
+        let bills = try context.fetch(FetchDescriptor<Bill>()).map {
+            Backup.BillRecord(id: $0.id, name: $0.name, amount: $0.amount, currency: $0.currency,
+                              accountID: $0.account?.id, categoryID: $0.category?.id, cadence: $0.cadence,
+                              interval: $0.interval, nextDue: $0.nextDue, anchorDay: $0.anchorDay,
+                              remindDays: $0.remindDays, active: $0.active, createdAt: $0.createdAt)
+        }
+        let goals = try context.fetch(FetchDescriptor<Goal>()).map {
+            Backup.GoalRecord(id: $0.id, name: $0.name, target: $0.target, currency: $0.currency,
+                              targetDate: $0.targetDate, accountID: $0.account?.id,
+                              contributions: $0.contributions, createdAt: $0.createdAt)
+        }
+        let netWorthSnapshots = try context.fetch(FetchDescriptor<NetWorthSnapshot>()).map {
+            Backup.NetWorthSnapshotRecord(id: $0.id, date: $0.date, total: $0.total, currency: $0.currency)
+        }
         var settings: [String: Any] = [:]
         for key in Backup.settingsKeys { settings[key] = defaults.object(forKey: key) }
         return try JSONEncoder().encode(Backup(
             version: Backup.currentVersion, createdAt: .now, attachments: attachments,
             settings: PropertyListSerialization.data(fromPropertyList: settings, format: .binary, options: 0),
-            tags: tags, taskExtras: taskExtras))
+            tags: tags, taskExtras: taskExtras, wakeAlarms: wakeAlarms, wakeLogs: wakeLogs,
+            accounts: accounts, categories: categories, transactions: transactions, transfers: transfers,
+            bills: bills, goals: goals, netWorthSnapshots: netWorthSnapshots))
     }
 
     static func restore(_ data: Data, context: ModelContext, files: AttachmentFileStore, defaults: UserDefaults) throws {
@@ -113,6 +267,108 @@ enum BackupService {
                     extras.estimateMinutes = record.estimateMinutes
                     context.insert(extras)
                     extras.tags = record.tagNames.compactMap { tagsByKey[key($0)] }
+                }
+            }
+            // Files lacking wake alarms/logs leave existing ones alone.
+            if let alarms = backup.wakeAlarms {
+                try context.fetch(FetchDescriptor<WakeAlarm>()).forEach(context.delete)
+                for record in alarms {
+                    let alarm = WakeAlarm(hour: record.hour, minute: record.minute, weekdays: record.weekdays)
+                    alarm.id = record.id
+                    alarm.isOn = record.isOn
+                    context.insert(alarm)
+                }
+            }
+            if let logs = backup.wakeLogs {
+                try context.fetch(FetchDescriptor<WakeLog>()).forEach(context.delete)
+                for record in logs {
+                    let log = WakeLog(firstRing: record.firstRing, calendar: .current)
+                    log.day = record.day
+                    log.reRings = record.reRings
+                    log.outOfBed = record.outOfBed
+                    context.insert(log)
+                }
+            }
+            // Files lacking finance data leave existing accounts etc. alone.
+            if let accountRecords = backup.accounts {
+                try context.fetch(FetchDescriptor<Transaction>()).forEach(context.delete)
+                try context.fetch(FetchDescriptor<Transfer>()).forEach(context.delete)
+                try context.fetch(FetchDescriptor<Bill>()).forEach(context.delete)
+                try context.fetch(FetchDescriptor<Goal>()).forEach(context.delete)
+                try context.fetch(FetchDescriptor<Category>()).forEach(context.delete)
+                try context.fetch(FetchDescriptor<Account>()).forEach(context.delete)
+                var accounts: [UUID: Account] = [:]
+                for record in accountRecords {
+                    let account = Account(name: record.name, type: record.type, currency: record.currency,
+                                          openingBalance: record.openingBalance)
+                    account.id = record.id
+                    account.archived = record.archived
+                    account.createdAt = record.createdAt
+                    context.insert(account)
+                    accounts[record.id] = account
+                }
+                var categories: [UUID: Category] = [:]
+                for record in backup.categories ?? [] {
+                    let category = Category(name: record.name, icon: record.icon, color: record.color)
+                    category.id = record.id
+                    category.sortOrder = record.sortOrder ?? 0
+                    category.budget = record.budget
+                    category.isIncome = record.isIncome ?? false
+                    context.insert(category)
+                    categories[record.id] = category
+                }
+                for record in backup.transactions ?? [] {
+                    let transaction = Transaction(amount: record.amount, currency: record.currency, date: record.date)
+                    transaction.id = record.id
+                    transaction.merchant = record.merchant
+                    transaction.notes = record.notes
+                    transaction.categoryIsAuto = record.categoryIsAuto
+                    transaction.attachmentID = record.attachmentID
+                    transaction.source = record.source
+                    transaction.homeAmount = record.homeAmount
+                    transaction.accountAmount = record.accountAmount
+                    context.insert(transaction)
+                    transaction.account = record.accountID.flatMap { accounts[$0] }
+                    transaction.category = record.categoryID.flatMap { categories[$0] }
+                }
+                for record in backup.transfers ?? [] {
+                    let transfer = Transfer(amount: record.amount, toAmount: record.toAmount, date: record.date)
+                    transfer.id = record.id
+                    transfer.notes = record.notes
+                    context.insert(transfer)
+                    transfer.from = record.fromID.flatMap { accounts[$0] }
+                    transfer.to = record.toID.flatMap { accounts[$0] }
+                }
+                for record in backup.bills ?? [] {
+                    let bill = Bill(name: record.name, amount: record.amount, currency: record.currency,
+                                    nextDue: record.nextDue)
+                    bill.id = record.id
+                    bill.cadence = record.cadence
+                    bill.interval = record.interval
+                    bill.anchorDay = record.anchorDay
+                    bill.remindDays = record.remindDays
+                    bill.active = record.active
+                    bill.createdAt = record.createdAt
+                    context.insert(bill)
+                    bill.account = record.accountID.flatMap { accounts[$0] }
+                    bill.category = record.categoryID.flatMap { categories[$0] }
+                }
+                for record in backup.goals ?? [] {
+                    let goal = Goal(name: record.name, target: record.target, currency: record.currency)
+                    goal.id = record.id
+                    goal.targetDate = record.targetDate
+                    goal.contributions = record.contributions
+                    goal.createdAt = record.createdAt
+                    context.insert(goal)
+                    goal.account = record.accountID.flatMap { accounts[$0] }
+                }
+            }
+            if let snapshots = backup.netWorthSnapshots {
+                try context.fetch(FetchDescriptor<NetWorthSnapshot>()).forEach(context.delete)
+                for record in snapshots {
+                    let snapshot = NetWorthSnapshot(date: record.date, total: record.total, currency: record.currency)
+                    snapshot.id = record.id
+                    context.insert(snapshot)
                 }
             }
             try context.save()

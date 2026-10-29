@@ -9,7 +9,23 @@ enum Storage {
         Attachment.self,
         Tag.self,
         TaskExtras.self,
+        WakeAlarm.self,
+        WakeLog.self,
+        Account.self,
+        Category.self,
+        Transaction.self,
+        Transfer.self,
+        Bill.self,
+        Goal.self,
+        NetWorthSnapshot.self,
     ]
+
+    /// DEBUG `-miseSeedFinance YES`: in-memory seeded store; shared side effects (backup, AlarmKit) must skip.
+    #if DEBUG
+    static let inMemory = UserDefaults.standard.bool(forKey: "miseSeedFinance")
+    #else
+    static let inMemory = false
+    #endif
 
     /// `groupContainer: .none`: the default (.automatic) moves the store into
     /// the App Group once that entitlement exists (#10). Keep it app-private.

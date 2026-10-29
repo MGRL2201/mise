@@ -1,0 +1,362 @@
+import SwiftUI
+import SwiftData
+
+/// Non-archived accounts by name, plus `keeping` (current selections) even if archived.
+func choices(_ accounts: [Account], keeping: [Account?]) -> [Account] {
+    accounts.filter { account in !account.archived || keeping.contains { $0 == account } }
+        .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+}
+
+/// New or existing transaction (#36).
+struct TransactionEditor: View {
+    let transaction: Transaction?
+    private let originalMerchant: String?  // captured: canPrefill runs after awaits, when the model may be deleted
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+    @Query private var accounts: [Account]
+    @Query private var categories: [Category]
+    @Query private var transactions: [Transaction]
+    @State private var income: Bool
+    @State private var amount: String
+    @State private var account: Account?
+    @State private var currency: String
+    @State private var charged: String
+    @State private var date: Date
+    @State private var merchant: String
+    @State private var category: Category?
+    @State private var categoryIsAuto: Bool
+    @State private var picked = false  // user chose a category in this editor session
+    @State private var newCategory = ""
+    @State private var notes: String
+    @State private var confirmingDelete = false
+
+    init(transaction: Transaction?, account: Account? = nil) {
+        self.transaction = transaction
+        originalMerchant = transaction?.merchant
+        let account = account ?? transaction?.account
+        _income = State(initialValue: (transaction?.amount ?? 0) > 0)
+        _amount = State(initialValue: transaction.map { Accounts.plain(abs($0.amount)) } ?? "")
+        _account = State(initialValue: account)
+        _currency = State(initialValue: transaction?.currency ?? account?.currency ?? FX.home())
+        _charged = State(initialValue: transaction?.accountAmount.map { Accounts.plain(abs($0)) } ?? "")
+        _date = State(initialValue: transaction?.date ?? .now)
+        _merchant = State(initialValue: transaction?.merchant ?? "")
+        _category = State(initialValue: transaction?.category)
+        _categoryIsAuto = State(initialValue: transaction?.categoryIsAuto ?? false)
+        _notes = State(initialValue: transaction?.notes ?? "")
+    }
+
+    /// nil once deleted: the sheet still renders during dismissal and must not read a dead model.
+    private var live: Transaction? {
+        guard let transaction, !transaction.isDeleted, transaction.modelContext != nil else { return nil }
+        return transaction
+    }
+
+    private var foreign: Bool { account.map { $0.currency != currency } ?? false }
+    private var amountValue: Decimal? { Accounts.parseAmount(amount).flatMap { $0 == 0 ? nil : $0 } }
+    /// 0 = no charged amount (hidden or empty); nil = unparseable.
+    private var chargedValue: Decimal? { foreign ? Accounts.parseAmount(charged) : 0 }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Picker("Type", selection: $income) {
+                        Text("Expense").tag(false)
+                        Text("Income").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    TextField("Amount", text: $amount)
+                        #if os(iOS)
+                        .keyboardType(.numbersAndPunctuation)
+                        #endif
+                    Picker("Account", selection: $account) {
+                        Text("Choose").tag(Account?.none)
+                        ForEach(choices(accounts, keeping: [account]), id: \.self) { Text($0.name).tag(Optional($0)) }
+                    }
+                    CurrencyPicker(title: "Currency", selection: $currency)
+                    if let account, foreign {
+                        TextField("Charged in \(account.currency)", text: $charged)
+                            #if os(iOS)
+                            .keyboardType(.numbersAndPunctuation)
+                            #endif
+                    }
+                    DatePicker("Date", selection: $date)
+                } footer: {
+                    if choices(accounts, keeping: [account]).isEmpty { Text("Add an account first") }
+                    if foreign { Text("Optional. Used for the account balance instead of the FX rate.") }
+                }
+                Section {
+                    TextField("Merchant", text: $merchant)
+                    ForEach(TransactionEntry.merchantSuggestions(merchant, from: transactions.map(\.merchant)), id: \.self) { suggestion in
+                        Button(suggestion) { merchant = suggestion }
+                    }
+                }
+                Section {
+                    Picker("Category", selection: Binding(get: { category }, set: {
+                        category = $0
+                        picked = true
+                        categoryIsAuto = false
+                    })) {
+                        Text("None").tag(Category?.none)
+                        // Keep the current pick so a refund in a spending category still renders.
+                        ForEach(Budgets.ordered(categories.filter { $0.isIncome == income || $0 == category }), id: \.self) {
+                            Text($0.name).tag(Optional($0))
+                        }
+                    }
+                    HStack {
+                        TextField("New category", text: $newCategory)
+                            .onSubmit(addCategory)
+                        Button("Add", action: addCategory)
+                            .disabled(newCategory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || otherKind != nil)
+                    }
+                } footer: {
+                    if let otherKind {
+                        Text("\"\(otherKind.name)\" is \(otherKind.isIncome ? "an income" : "a spending") category")
+                    } else if categoryIsAuto && category != nil {
+                        Label("Suggested automatically — pick another to correct it.", systemImage: "sparkles")
+                    }
+                }
+                Section {
+                    TextField("Notes", text: $notes, axis: .vertical)
+                }
+                if let transaction = live {
+                    Section {
+                        Button("Delete Transaction", role: .destructive) { confirmingDelete = true }
+                            .confirmationDialog("Delete this transaction?", isPresented: $confirmingDelete) {
+                                Button("Delete", role: .destructive) {
+                                    modelContext.delete(transaction)
+                                    try? modelContext.save()
+                                    dismiss()
+                                }
+                            }
+                    }
+                }
+            }
+            .navigationTitle(transaction == nil ? "New Transaction" : "Edit Transaction")
+            .themedBackground()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save", action: save)
+                        .disabled(amountValue == nil || chargedValue == nil || account == nil)
+                }
+            }
+            .task(id: "\(income)|\(merchant)") { await prefillCategory() }
+            .onAppear {
+                if account == nil && transaction == nil { account = choices(accounts, keeping: []).first }
+            }
+            .onChange(of: income) {
+                if let category, category.isIncome != income { self.category = nil; categoryIsAuto = false }
+            }
+            .onChange(of: account) { old, new in
+                if old?.currency != new?.currency { charged = "" }
+                // Follow the account's currency unless the user picked a different one;
+                // a new transaction with no account yet takes the first account's.
+                if let new, currency == old?.currency || (old == nil && transaction == nil) { currency = new.currency }
+            }
+        }
+    }
+
+    /// Existing category of the other kind named like the typed one; names are unique across kinds.
+    private var otherKind: Category? {
+        Budgets.named(newCategory, in: categories).flatMap { $0.isIncome == income ? nil : $0 }
+    }
+
+    // ponytail: inserted immediately, so Cancel keeps a new category; rename/delete it in Categories.
+    private func addCategory() {
+        let name = newCategory.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        if let existing = Budgets.named(name, in: categories) {
+            guard existing.isIncome == income else { return }  // names are unique across kinds; keep the text
+            category = existing
+        } else {
+            let created = Category(name: name)
+            created.isIncome = income
+            created.sortOrder = (categories.map(\.sortOrder).max() ?? -1) + 1
+            modelContext.insert(created)
+            category = created
+        }
+        newCategory = ""
+        picked = true
+        categoryIsAuto = false
+    }
+
+    /// Expenses only: income is never auto-suggested.
+    private var canPrefill: Bool {
+        !income && Self.shouldPrefill(picked: picked, hasCategory: category != nil, isAuto: categoryIsAuto,
+                                      merchant: merchant, original: originalMerchant)
+    }
+
+    /// Pure. Never after a user pick or over a manual category; for an existing transaction only once
+    /// its merchant changes (`original` = loaded merchant, nil when new), so opening it never re-suggests.
+    static func shouldPrefill(picked: Bool, hasCategory: Bool, isAuto: Bool, merchant: String, original: String?) -> Bool {
+        !picked && (!hasCategory || isAuto) && merchant != original
+    }
+
+    /// Rule instantly, else the model after a typing pause; never overrides a user pick.
+    private func prefillCategory() async {
+        guard canPrefill else { return }
+        guard !merchant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            if categoryIsAuto { category = nil; categoryIsAuto = false }
+            return
+        }
+        if let rule = Categorizer.rule(for: merchant, in: categories) {
+            category = rule
+            categoryIsAuto = true
+            return
+        }
+        try? await Task.sleep(for: .milliseconds(600))
+        guard !Task.isCancelled else { return }
+        let result = await Categorizer.suggest(merchant: merchant, amount: amountValue ?? 0, categories: categories)
+        guard !Task.isCancelled, canPrefill else { return }
+        category = result
+        categoryIsAuto = result != nil
+    }
+
+    private func save() {
+        guard let value = amountValue, let chargedValue, let account else { return }
+        let target = transaction ?? Transaction(amount: 0, currency: currency, date: date)
+        if transaction == nil { modelContext.insert(target) }
+        target.amount = TransactionEntry.signed(value, income: income)
+        target.currency = currency
+        target.date = date
+        target.merchant = merchant.trimmingCharacters(in: .whitespacesAndNewlines)
+        target.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        target.account = account
+        target.category = category
+        target.categoryIsAuto = categoryIsAuto && category != nil
+        // Income mode never touches rules: a nil pick would clear the merchant's spending rule.
+        if picked && !income && !target.merchant.isEmpty { Categorizer.learn(target.merchant, category: category) }
+        // Also clears a stale charge when the account or currency changed.
+        target.accountAmount = chargedValue == 0 ? nil : TransactionEntry.signed(chargedValue, income: income)
+        target.homeAmount = nil // FX.refresh refills it for the new amount/currency/date.
+        try? modelContext.save()
+        let context = modelContext
+        let (savedCategory, savedDate) = (category, date)
+        Task {
+            await FX.refresh(context: context)
+            await Budgets.checkAlerts(for: savedCategory, on: savedDate, context: context)
+        }
+        dismiss()
+    }
+}
+
+/// New or existing transfer between own accounts (#36).
+struct TransferEditor: View {
+    let transfer: Transfer?
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+    @Query private var accounts: [Account]
+    @State private var from: Account?
+    @State private var to: Account?
+    @State private var amount: String
+    @State private var received: String
+    @State private var date: Date
+    @State private var notes: String
+    @State private var confirmingDelete = false
+
+    init(transfer: Transfer?, from: Account? = nil, to: Account? = nil) {
+        self.transfer = transfer
+        _from = State(initialValue: transfer?.from ?? from)
+        _to = State(initialValue: transfer?.to ?? to)
+        _amount = State(initialValue: transfer.map { Accounts.plain($0.amount) } ?? "")
+        _received = State(initialValue: transfer.map { $0.from?.currency != $0.to?.currency ? Accounts.plain($0.toAmount) : "" } ?? "")
+        _date = State(initialValue: transfer?.date ?? .now)
+        _notes = State(initialValue: transfer?.notes ?? "")
+    }
+
+    private var live: Transfer? {
+        guard let transfer, !transfer.isDeleted, transfer.modelContext != nil else { return nil }
+        return transfer
+    }
+
+    private var crossCurrency: Bool {
+        guard let from, let to else { return false }
+        return from.currency != to.currency
+    }
+
+    private var error: String? {
+        TransactionEntry.transferError(
+            from: from, to: to, amount: Accounts.parseAmount(amount), toAmount: Accounts.parseAmount(received)
+        )
+    }
+
+    var body: some View {
+        let options = choices(accounts, keeping: [from, to])
+        NavigationStack {
+            Form {
+                Section {
+                    Picker("From", selection: $from) {
+                        Text("Choose").tag(Account?.none)
+                        ForEach(options, id: \.self) { Text($0.name).tag(Optional($0)) }
+                    }
+                    Picker("To", selection: $to) {
+                        Text("Choose").tag(Account?.none)
+                        ForEach(options, id: \.self) { Text($0.name).tag(Optional($0)) }
+                    }
+                    TextField("Amount \(from?.currency ?? "")", text: $amount)
+                        #if os(iOS)
+                        .keyboardType(.numbersAndPunctuation)
+                        #endif
+                    if crossCurrency, let to {
+                        TextField("Received \(to.currency)", text: $received)
+                            #if os(iOS)
+                            .keyboardType(.numbersAndPunctuation)
+                            #endif
+                    }
+                    DatePicker("Date", selection: $date)
+                    TextField("Notes", text: $notes, axis: .vertical)
+                } footer: {
+                    VStack(alignment: .leading) {
+                        if let error { Text(error) }
+                        Text("Paying a credit card? Transfer to the card account.")
+                    }
+                }
+                if let transfer = live {
+                    Section {
+                        Button("Delete Transfer", role: .destructive) { confirmingDelete = true }
+                            .confirmationDialog("Delete this transfer?", isPresented: $confirmingDelete) {
+                                Button("Delete", role: .destructive) {
+                                    modelContext.delete(transfer)
+                                    try? modelContext.save()
+                                    dismiss()
+                                }
+                            }
+                    }
+                }
+            }
+            .navigationTitle(transfer == nil ? "New Transfer" : "Edit Transfer")
+            .themedBackground()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save", action: save).disabled(error != nil)
+                }
+            }
+            .onAppear {
+                // Prefer paying from a bank or cash account over another card/brokerage.
+                if transfer == nil && from == nil {
+                    from = options.first { $0 != to && ($0.type == .debit || $0.type == .cash) }
+                        ?? options.first { $0 != to }
+                }
+            }
+            .onChange(of: from?.currency) { old, new in if old != new { received = "" } }
+            .onChange(of: to?.currency) { old, new in if old != new { received = "" } }
+        }
+    }
+
+    private func save() {
+        guard error == nil, let value = Accounts.parseAmount(amount) else { return }
+        let target = transfer ?? Transfer(amount: 0, toAmount: 0, date: date)
+        if transfer == nil { modelContext.insert(target) }
+        target.amount = value
+        target.toAmount = crossCurrency ? Accounts.parseAmount(received) ?? 0 : value
+        target.from = from
+        target.to = to
+        target.date = date
+        target.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        try? modelContext.save()
+        dismiss()
+    }
+}

@@ -68,6 +68,39 @@ struct CompleteTaskIntent: AppIntent {
     }
 }
 
+/// Run by a Shortcuts "Transaction" personal automation (Wallet card tap) to log an Apple Pay purchase (#153).
+/// Optional params so a missing automation value never makes Shortcuts prompt.
+struct LogTransactionIntent: AppIntent {
+    static let title: LocalizedStringResource = "Log Transaction"
+    static let description = IntentDescription(
+        "Logs an Apple Pay purchase in mise. Use it in a Shortcuts Transaction automation, passing Amount, Merchant and Card.")
+
+    @Parameter(title: "Amount")
+    var amount: String?
+
+    @Parameter(title: "Merchant")
+    var merchant: String?
+
+    @Parameter(title: "Card")
+    var card: String?
+
+    @Parameter(title: "Date")
+    var date: Date?
+
+    @Dependency var container: ModelContainer
+
+    @MainActor func perform() async throws -> some IntentResult & ProvidesDialog {
+        let context = container.mainContext
+        let (dialog, saved) = await ApplePay.log(amount: amount ?? "", merchant: merchant ?? "", card: card ?? "",
+                                                 date: date ?? .now, context: context)
+        if let saved {
+            await FX.refresh(context: context)
+            await Budgets.checkAlerts(for: saved.category, on: saved.date, context: context)
+        }
+        return .result(dialog: IntentDialog(stringLiteral: dialog))
+    }
+}
+
 nonisolated struct MiseShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(

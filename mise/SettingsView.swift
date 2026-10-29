@@ -34,6 +34,9 @@ struct SettingsView: View {
     @AppStorage(WeeklyReview.enabledKey) private var weeklyReview = false
     @AppStorage(WeeklyReview.dayKey) private var weeklyReviewDay = WeeklyReview.defaultDay
     @AppStorage(WeeklyReview.timeKey) private var weeklyReviewTime = WeeklyReview.defaultTime
+    @AppStorage(FX.homeKey) private var homeCurrency = FX.home()
+    @AppStorage(MonthSummary.enabledKey) private var monthEnd = false
+    @AppStorage(MonthSummary.timeKey) private var monthEndTime = MonthSummary.defaultTime
 
     /// Minutes after midnight as a time of day today.
     private func time(_ minutes: Binding<Int>) -> Binding<Date> {
@@ -82,7 +85,9 @@ struct SettingsView: View {
             }
             .listRowBackground(Color(theme.surface))
 
-            Section("Finance") {
+            Section {
+                CurrencyPicker(title: "Home currency", selection: $homeCurrency)
+                .onChange(of: homeCurrency) { Task { await FX.rebase(context: modelContext) } }
                 SecureField("Stock price API key", text: $stockAPIKeyInput)
                 Text(stockAPIKeySaved ? "A key is stored." : "No key stored.")
                     .foregroundStyle(.secondary)
@@ -118,7 +123,17 @@ struct SettingsView: View {
                     }
                     .disabled(!stockAPIKeySaved)
                 }
+                Toggle("Month-end summary", isOn: $monthEnd)
+                if monthEnd {
+                    DatePicker("Time", selection: time($monthEndTime), displayedComponents: .hourAndMinute)
+                }
+            } header: {
+                Text("Finance")
+            } footer: {
+                Text("Month-end summary: a notification on the last day of each month that opens a summary of spend vs budget.")
             }
+            .onChange(of: monthEnd) { Task { await MonthSummary.sync(prompt: true) } }
+            .onChange(of: monthEndTime) { Task { await MonthSummary.sync(prompt: true) } }
             .listRowBackground(Color(theme.surface))
 
             Section("Calendar") {
@@ -337,6 +352,9 @@ struct SettingsView: View {
             store.reload()
             lock.reload()
             calendars.reloadSettings()
+            #if os(iOS)
+            Task { await WakeAlarms.sync((try? modelContext.fetch(FetchDescriptor<WakeAlarm>())) ?? []) }
+            #endif
         } catch {
             backupError = error.localizedDescription
         }

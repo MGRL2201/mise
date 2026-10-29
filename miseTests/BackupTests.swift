@@ -165,4 +165,142 @@ extension BackupTests {
         #expect(tags.map(\.name) == ["Work"])
         #expect(try target.context.fetch(FetchDescriptor<TaskExtras>()).first?.tags?.first === tags.first)
     }
+    @Test func financeRoundTripsAndReplacesStaleData() throws {
+        let source = try freshStore()
+        let account = Account(name: "Card", type: .credit, currency: "SGD", openingBalance: Decimal(string: "19.99")!)
+        account.archived = true
+        let debit = Account(name: "Debit", type: .debit, currency: "SGD")
+        let category = mise.Category(name: "Food", icon: "fork.knife", color: 0xFF8800)
+        category.sortOrder = 3
+        category.budget = Decimal(string: "450.50")!
+        let transaction = mise.Transaction(amount: Decimal(string: "-40.33")!, currency: "SGD", date: Date(timeIntervalSince1970: 1000))
+        transaction.merchant = "Hawker"
+        transaction.notes = "lunch"
+        transaction.categoryIsAuto = true
+        transaction.attachmentID = UUID()
+        transaction.source = .applePay
+        transaction.homeAmount = Decimal(string: "-40.33")!
+        transaction.accountAmount = Decimal(string: "-41.20")!
+        let transfer = Transfer(amount: 40, toAmount: 40, date: Date(timeIntervalSince1970: 2000))
+        transfer.notes = "pay card"
+        [account, debit].forEach(source.context.insert)
+        let salary = mise.Category(name: "Salary")
+        salary.isIncome = true
+        source.context.insert(category)
+        source.context.insert(salary)
+        source.context.insert(transaction)
+        source.context.insert(transfer)
+        transaction.account = account
+        transaction.category = category
+        transfer.from = debit
+        transfer.to = account
+        let goal = Goal(name: "Trip", target: Decimal(string: "1200.50")!, currency: "SGD")
+        goal.targetDate = Date(timeIntervalSince1970: 3000)
+        goal.createdAt = Date(timeIntervalSince1970: 4000)
+        goal.contributions = [GoalContribution(amount: 100, date: Date(timeIntervalSince1970: 100)),
+                              GoalContribution(amount: Decimal(string: "-20.25")!, date: Date(timeIntervalSince1970: 200))]
+        source.context.insert(goal)
+        goal.account = debit
+        try source.context.save()
+
+        let target = try freshStore()
+        target.context.insert(Goal(name: "Stale", target: 1, currency: "USD"))
+        target.context.insert(Account(name: "Stale", type: .cash, currency: "USD"))
+        target.context.insert(mise.Category(name: "Stale", icon: "tag", color: 0))
+        try target.context.save()
+        try restore(try export(source), into: target)
+
+        let accounts = try target.context.fetch(FetchDescriptor<Account>())
+        #expect(Set(accounts.map(\.name)) == ["Card", "Debit"])
+        let card = try #require(accounts.first { $0.id == account.id })
+        #expect(card.type == .credit && card.currency == "SGD" && card.openingBalance == Decimal(string: "19.99"))
+        #expect(card.archived && card.createdAt == account.createdAt)
+        let all = try target.context.fetch(FetchDescriptor<mise.Category>())
+        #expect(Set(all.map(\.name)) == ["Food", "Salary"])
+        #expect(all.filter(\.isIncome).map(\.name) == ["Salary"])
+        let categories = all.filter { !$0.isIncome }
+        #expect(categories.first?.id == category.id && categories.first?.icon == "fork.knife" && categories.first?.color == 0xFF8800)
+        #expect(categories.first?.sortOrder == 3 && categories.first?.budget == Decimal(string: "450.50"))
+        let copy = try #require(try target.context.fetch(FetchDescriptor<mise.Transaction>()).first)
+        #expect(copy.id == transaction.id && copy.amount == Decimal(string: "-40.33") && copy.currency == "SGD" && copy.date == transaction.date)
+        #expect(copy.merchant == "Hawker" && copy.notes == "lunch" && copy.categoryIsAuto)
+        #expect(copy.attachmentID == transaction.attachmentID && copy.source == .applePay && copy.homeAmount == Decimal(string: "-40.33"))
+        #expect(copy.accountAmount == Decimal(string: "-41.20"))
+        #expect(copy.account === card && copy.category === categories.first)
+        let transferCopy = try #require(try target.context.fetch(FetchDescriptor<Transfer>()).first)
+        #expect(transferCopy.id == transfer.id && transferCopy.amount == 40 && transferCopy.toAmount == 40)
+        #expect(transferCopy.date == transfer.date && transferCopy.notes == "pay card")
+        #expect(transferCopy.from?.id == debit.id && transferCopy.to === card)
+        #expect(Finance.balance(of: card, rates: FXRates()) == Decimal(string: "19.66"))
+        let goals = try target.context.fetch(FetchDescriptor<Goal>())
+        let goalCopy = try #require(goals.first)
+        #expect(goals.count == 1)
+        #expect(goalCopy.id == goal.id && goalCopy.name == "Trip" && goalCopy.target == Decimal(string: "1200.50"))
+        #expect(goalCopy.currency == "SGD" && goalCopy.targetDate == goal.targetDate && goalCopy.createdAt == goal.createdAt)
+        #expect(goalCopy.contributions == goal.contributions && goalCopy.account?.id == debit.id)
+    }
+
+    @Test func billsRoundTripAndReplaceStale() throws {
+        let source = try freshStore()
+        let account = Account(name: "Card", type: .credit, currency: "SGD")
+        let category = mise.Category(name: "Subs")
+        let bill = Bill(name: "Netflix", amount: Decimal(string: "19.98")!, currency: "SGD",
+                        nextDue: Date(timeIntervalSince1970: 1_800_000_000))
+        bill.cadence = .yearly
+        bill.interval = 2
+        bill.anchorDay = 31
+        bill.remindDays = 0
+        bill.active = false
+        bill.createdAt = Date(timeIntervalSince1970: 5000)
+        source.context.insert(account)
+        source.context.insert(category)
+        source.context.insert(bill)
+        bill.account = account
+        bill.category = category
+        try source.context.save()
+
+        let target = try freshStore()
+        target.context.insert(Bill(name: "Stale", amount: 1, currency: "USD", nextDue: .now))
+        try target.context.save()
+        try restore(try export(source), into: target)
+
+        let bills = try target.context.fetch(FetchDescriptor<Bill>())
+        let copy = try #require(bills.first)
+        #expect(bills.count == 1)
+        #expect(copy.id == bill.id && copy.name == "Netflix" && copy.amount == Decimal(string: "19.98") && copy.currency == "SGD")
+        #expect(copy.cadence == .yearly && copy.interval == 2 && copy.nextDue == bill.nextDue && copy.anchorDay == 31)
+        #expect(copy.remindDays == 0 && !copy.active && copy.createdAt == bill.createdAt)
+        #expect(copy.account?.id == account.id && copy.category?.id == category.id)
+    }
+
+    @Test func backupWithoutFinanceLeavesAccountsAlone() throws {
+        let target = try freshStore()
+        target.context.insert(Account(name: "Kept", type: .cash, currency: "SGD"))
+        target.context.insert(NetWorthSnapshot(date: .now, total: 5, currency: "SGD"))
+        try target.context.save()
+        let settings = try PropertyListSerialization.data(fromPropertyList: [String: Any](), format: .binary, options: 0)
+        let json = #"{"version":2,"createdAt":0,"attachments":[],"settings":"\#(settings.base64EncodedString())","tags":[],"taskExtras":[]}"#
+        try restore(Data(json.utf8), into: target)
+        #expect(try target.context.fetch(FetchDescriptor<Account>()).map(\.name) == ["Kept"])
+        #expect(try target.context.fetch(FetchDescriptor<NetWorthSnapshot>()).map(\.total) == [5])
+    }
+
+    @Test func netWorthSnapshotsRoundTripAndReplaceStale() throws {
+        let source = try freshStore()
+        let snapshot = NetWorthSnapshot(date: Date(timeIntervalSince1970: 1_800_000_000),
+                                        total: Decimal(string: "1234.56")!, currency: "SGD")
+        source.context.insert(snapshot)
+        try source.context.save()
+
+        let target = try freshStore()
+        target.context.insert(NetWorthSnapshot(date: .now, total: 1, currency: "USD"))
+        try target.context.save()
+        try restore(try export(source), into: target)
+
+        let snapshots = try target.context.fetch(FetchDescriptor<NetWorthSnapshot>())
+        let copy = try #require(snapshots.first)
+        #expect(snapshots.count == 1)
+        #expect(copy.id == snapshot.id && copy.date == snapshot.date)
+        #expect(copy.total == Decimal(string: "1234.56") && copy.currency == "SGD")
+    }
 }
