@@ -6,6 +6,11 @@ extension Holding {
     var displayName: String { symbol.isEmpty ? name : symbol }
 }
 
+/// Amount field value, rejecting negatives (short positions out of scope). Empty parses as 0.
+private func nonNegativeAmount(_ text: String) -> Decimal? {
+    Accounts.parseAmount(text).flatMap { $0 >= 0 ? $0 : nil }
+}
+
 /// New or existing holding (#48). An empty price means unpriced (not in totals).
 struct HoldingEditor: View {
     let holding: Holding?
@@ -46,8 +51,9 @@ struct HoldingEditor: View {
     private var hasPrice: Bool { !price.trimmingCharacters(in: .whitespaces).isEmpty }
     private var valid: Bool {
         !(trimmedSymbol.isEmpty && trimmedName.isEmpty)
-            && Accounts.parseAmount(quantity) != nil && Accounts.parseAmount(cost) != nil
-            && (!hasPrice || Accounts.parseAmount(price) != nil)
+            && !quantity.trimmingCharacters(in: .whitespaces).isEmpty
+            && nonNegativeAmount(quantity) != nil && nonNegativeAmount(cost) != nil
+            && (!hasPrice || nonNegativeAmount(price) != nil)
     }
 
     var body: some View {
@@ -63,7 +69,7 @@ struct HoldingEditor: View {
                         #if os(iOS)
                         .keyboardType(.numbersAndPunctuation)
                         #endif
-                    TextField("Cost basis (total)", text: $cost)
+                    TextField("Cost basis (0 if unknown)", text: $cost)
                         #if os(iOS)
                         .keyboardType(.numbersAndPunctuation)
                         #endif
@@ -71,6 +77,7 @@ struct HoldingEditor: View {
                         #if os(iOS)
                         .keyboardType(.numbersAndPunctuation)
                         #endif
+                        .onChange(of: price) { priceDate = .now }
                     if hasPrice {
                         DatePicker("Price date", selection: $priceDate, displayedComponents: .date)
                     }
@@ -104,7 +111,7 @@ struct HoldingEditor: View {
     }
 
     private func save() {
-        guard valid, let quantityValue = Accounts.parseAmount(quantity), let costValue = Accounts.parseAmount(cost),
+        guard valid, let quantityValue = nonNegativeAmount(quantity), let costValue = nonNegativeAmount(cost),
               holding == nil || live != nil else { return dismiss() }
         let saved = live ?? Holding(symbol: "", name: "", kind: kind, quantity: 0, costBasis: 0, currency: currency)
         if holding == nil { modelContext.insert(saved) }
@@ -115,7 +122,7 @@ struct HoldingEditor: View {
         saved.quantity = quantityValue
         saved.costBasis = costValue
         saved.currency = currency
-        saved.price = hasPrice ? Accounts.parseAmount(price) : nil
+        saved.price = hasPrice ? nonNegativeAmount(price) : nil
         saved.priceDate = hasPrice ? priceDate : nil
         try? modelContext.save()
         dismiss()
@@ -136,7 +143,7 @@ struct PriceEditor: View {
     }
 
     private var value: Decimal? {
-        price.trimmingCharacters(in: .whitespaces).isEmpty ? nil : Accounts.parseAmount(price)
+        price.trimmingCharacters(in: .whitespaces).isEmpty ? nil : nonNegativeAmount(price)
     }
 
     var body: some View {
@@ -158,12 +165,13 @@ struct PriceEditor: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
+                        guard !holding.isDeleted, holding.modelContext != nil else { return dismiss() }
                         holding.price = value
                         holding.priceDate = date
                         try? modelContext.save()
                         dismiss()
                     }
-                    .disabled(value == nil)
+                    .disabled(value == nil || holding.isDeleted || holding.modelContext == nil)
                 }
             }
         }
