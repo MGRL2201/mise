@@ -29,6 +29,15 @@ struct TransactionReviewTests {
         #expect(!TransactionReview.isDuplicate(draft, in: existing(currency: "USD", days: 0)))
     }
 
+    @Test func repeats() {
+        let day = Calendar.current.startOfDay(for: date)
+        let first = DraftTransaction(amount: -12, currency: "SGD", date: day.addingTimeInterval(9 * 3600), merchant: "Grab Ride")
+        let again = DraftTransaction(amount: -12, currency: "SGD", date: day.addingTimeInterval(18 * 3600), merchant: " grab  RIDE ")
+        let nextDay = DraftTransaction(amount: -12, currency: "SGD", date: day.addingTimeInterval(33 * 3600), merchant: "Grab Ride")
+        let other = DraftTransaction(amount: -13, currency: "SGD", date: day.addingTimeInterval(9 * 3600), merchant: "Grab Ride")
+        #expect(TransactionReview.repeats([first, again, nextDay, other]) == [again.id])
+    }
+
     @Test func commit() throws {
         let sgd = Account(name: "Card", type: .credit, currency: "SGD")
         let food = Category(name: "Food"), transport = Category(name: "Transport")

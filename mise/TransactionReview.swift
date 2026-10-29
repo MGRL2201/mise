@@ -35,6 +35,19 @@ enum TransactionReview {
         }
     }
 
+    /// Ids of drafts repeating an earlier draft of the same import: same day, currency, signed amount, normalized merchant.
+    static func repeats(_ drafts: [DraftTransaction]) -> Set<UUID> {
+        struct Key: Hashable { let day: Date; let currency: String; let amount: Decimal; let merchant: String }
+        var seen: Set<Key> = []
+        var result: Set<UUID> = []
+        for draft in drafts {
+            let key = Key(day: Calendar.current.startOfDay(for: draft.date), currency: draft.currency,
+                          amount: draft.amount, merchant: Categorizer.normalize(draft.merchant))
+            if !seen.insert(key).inserted { result.insert(draft.id) }
+        }
+        return result
+    }
+
     static func isValid(_ draft: DraftTransaction) -> Bool {
         draft.amount != 0 && draft.account != nil
     }

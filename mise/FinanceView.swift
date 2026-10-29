@@ -21,6 +21,10 @@ struct FinanceView: View {
     @State private var importing: UTType?
     @State private var readingReceipt = false
     @State private var receipt: (drafts: [DraftTransaction], source: ReviewSource)?
+    @State private var csv: ReviewSource?
+    @State private var showingCSV = false
+    /// Mapped CSV drafts held until the mapping sheet has dismissed, then shown in review.
+    @State private var pendingCSV: (drafts: [DraftTransaction], source: ReviewSource)?
     @Bindable private var billPrompt = BillPrompt.shared
     @Bindable private var summaryPrompt = MonthSummaryPrompt.shared
     #if DEBUG
@@ -79,6 +83,8 @@ struct FinanceView: View {
                         .disabled(readingReceipt)
                         Button("Import PDF", systemImage: "doc.richtext") { importing = .pdf }
                             .disabled(readingReceipt)
+                        Button("Import CSV", systemImage: "tablecells") { importing = .delimitedText }
+                            .disabled(readingReceipt)
                     }
                     .disabled(!accounts.contains { !$0.archived })
                     Button("New Account", systemImage: "banknote") { isAdding = true }
@@ -127,10 +133,29 @@ struct FinanceView: View {
             defer { if accessing { url.stopAccessingSecurityScopedResource() } }
             guard let data = try? Data(contentsOf: url) else { return }
             let source = ReviewSource(data: data, filename: url.lastPathComponent)
-            if UTType(filenameExtension: url.pathExtension)?.conforms(to: .pdf) == true {
+            let type = UTType(filenameExtension: url.pathExtension)
+            if type?.conforms(to: .delimitedText) == true {
+                csv = source
+                showingCSV = true
+            } else if type?.conforms(to: .pdf) == true {
                 read(source) { await PDFImport.text(in: data) }
             } else {
                 read(source) { await ReceiptScan.text(in: [data]) }
+            }
+        }
+        // Review only after the mapping sheet is gone: two sheets in sequence on one view otherwise race.
+        .sheet(isPresented: $showingCSV, onDismiss: {
+            csv = nil
+            if let pendingCSV {
+                receipt = pendingCSV
+                self.pendingCSV = nil
+            }
+        }) {
+            if let source = csv {
+                CSVImportView(source: source) { drafts in
+                    pendingCSV = (drafts, source)
+                    showingCSV = false
+                }
             }
         }
         .sheet(isPresented: Binding { receipt != nil } set: { if !$0 { receipt = nil } }) {
@@ -139,7 +164,7 @@ struct FinanceView: View {
         .onAppear {
             if accounts.isEmpty && !confirmed { askHome = true }
             #if DEBUG
-            // Screenshot hook: `-miseMoney transaction|transfer|all|budgets|bills|goals|reports|summary|uncategorized|review|extract|scan|pdf|applepay`, once per launch.
+            // Screenshot hook: `-miseMoney transaction|transfer|all|budgets|bills|goals|reports|summary|uncategorized|review|extract|scan|pdf|csv|csvreview|applepay`, once per launch.
             if !debugOpened {
                 debugOpened = true
                 switch UserDefaults.standard.string(forKey: "miseMoney") {
@@ -162,6 +187,14 @@ struct FinanceView: View {
                     if let source = TransactionReview.sampleSource() { read(source) { await ReceiptScan.text(in: [source.data]) } }
                 case "pdf":
                     if let source = TransactionReview.samplePDF() { read(source) { await PDFImport.text(in: source.data) } }
+                case "csv": csv = CSVImport.sampleCSVSource(); showingCSV = true
+                case "csvreview":
+                    let source = CSVImport.sampleCSVSource()
+                    let rows = CSVImport.rows(source.data)
+                    if let account = accounts.filter({ !$0.archived })
+                        .min(by: { $0.name.localizedStandardCompare($1.name) == .orderedAscending }) {
+                        receipt = (CSVImport.drafts(rows, mapping: CSVImport.guess(header: rows.first ?? []), account: account).drafts, source)
+                    }
                 #if os(iOS)
                 case "applepay": showingApplePay = true
                 #endif
