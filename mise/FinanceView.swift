@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UniformTypeIdentifiers
 
 /// Money tab home: net worth, accounts by type, archived accounts (#35).
 struct FinanceView: View {
@@ -479,6 +480,8 @@ struct AllTransactionsView: View {
     @State private var category: Category?
     @State private var month: Date?
     @State private var editing: Transaction?
+    @State private var exportDocument: CSVDocument?
+    @State private var exportError: String?
 
     var body: some View {
         let shown = transactions.filter {
@@ -540,7 +543,40 @@ struct AllTransactionsView: View {
                 }
                 .pickerStyle(.menu)
             }
+            ToolbarItem(placement: .primaryAction) {
+                if filtered {
+                    Menu("Export CSV", systemImage: "square.and.arrow.up") {
+                        Button("Export Shown (\(shown.count))") { export(shown) }
+                            .disabled(shown.isEmpty)
+                        Button("Export All (\(transactions.count))") { export(transactions) }
+                    }
+                    .disabled(transactions.isEmpty)
+                } else {
+                    Button("Export CSV", systemImage: "square.and.arrow.up") { export(transactions) }
+                        .disabled(transactions.isEmpty)
+                }
+            }
         }
         .sheet(item: $editing) { TransactionEditor(transaction: $0) }
+        .fileExporter(
+            isPresented: Binding { exportDocument != nil } set: { if !$0 { exportDocument = nil } },
+            document: exportDocument, contentType: .commaSeparatedText, defaultFilename: CSVExport.filename()
+        ) { result in
+            if case .failure(let error) = result { exportError = error.localizedDescription }
+        }
+        .alert(
+            "Export failed",
+            isPresented: Binding { exportError != nil } set: { if !$0 { exportError = nil } }
+        ) {} message: {
+            Text(exportError ?? "")
+        }
+    }
+
+    /// Rows read SwiftData models so build on the main actor; encoding is pure, so run it off.
+    private func export(_ list: [Transaction]) {
+        let rows = CSVExport.rows(list, homeCurrency: FX.home())
+        Task {
+            exportDocument = CSVDocument(data: await Task.detached { CSVExport.encode(rows) }.value)
+        }
     }
 }
