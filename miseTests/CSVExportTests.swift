@@ -76,7 +76,7 @@ struct CSVExportTests {
         let rates = FXRates(days: [FXRates.day(today): ["EUR": 1, "USD": Decimal(string: "1.1")!, "SGD": Decimal(string: "1.5")!]])
         let apple = Holding(symbol: "AAPL", name: "Apple, Inc.", kind: .stock, quantity: 10, costBasis: 1600, currency: "USD")
         apple.price = Decimal(string: "150.25")!
-        apple.priceDate = date(2026, 3, 4, hour: 23, minute: 30, in: plus2)
+        apple.priceDate = date(2026, 3, 4, hour: 0, minute: 30, in: plus2)  // UTC: 3 Mar
         let btc = Holding(symbol: "BTC", name: "Bitcoin", kind: .crypto, quantity: Decimal(string: "0.5")!, costBasis: 20000, currency: "USD")
         let gbp = Holding(symbol: "VUSA", name: "S&P", kind: .fund, quantity: 2, costBasis: 100, currency: "GBP")
         gbp.price = 60

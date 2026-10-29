@@ -29,7 +29,7 @@ enum CSVExport {
     static let holdingsHeader = ["account", "kind", "symbol", "name", "quantity", "cost_basis", "currency", "price",
                                  "price_date", "value", "gain_loss", "home_value", "home_currency"]
 
-    /// Header, then one row per holding. Value fields are empty without a price; home_value is empty without today's FX rate.
+    /// Header, then one row per holding. Value fields are empty without a price; home_value is empty without a cached rate on or before today.
     static func holdingRows(_ holdings: [Holding], rates: FXRates, homeCurrency: String, today: Date = .now,
                             timeZone: TimeZone = .current) -> [[String]] {
         let day = Date.ISO8601FormatStyle(timeZone: timeZone).year().month().day()

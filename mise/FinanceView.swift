@@ -37,6 +37,7 @@ struct FinanceView: View {
     @State private var showingSummary = false
     @State private var showingUncategorized = false
     @State private var showingReview = false
+    @State private var showingHoldings: Account?
     @State private var extracted: [DraftTransaction]?
     #if os(iOS)
     @State private var showingApplePay = false
@@ -99,6 +100,7 @@ struct FinanceView: View {
         .navigationDestination(isPresented: $showingReports) { ReportsView() }
         .navigationDestination(isPresented: $showingSummary) { MonthSummaryView(month: .now) }
         .navigationDestination(isPresented: $showingUncategorized) { UncategorizedView() }
+        .navigationDestination(item: $showingHoldings) { AccountDetailView(account: $0, rates: rates) }
         .sheet(isPresented: $showingReview) {
             TransactionReviewView(drafts: TransactionReview.sampleDrafts(accounts: accounts), source: TransactionReview.sampleSource())
         }
@@ -164,7 +166,7 @@ struct FinanceView: View {
         .onAppear {
             if accounts.isEmpty && !confirmed { askHome = true }
             #if DEBUG
-            // Screenshot hook: `-miseMoney transaction|transfer|all|budgets|bills|goals|reports|summary|uncategorized|review|extract|scan|pdf|csv|csvreview|applepay`, once per launch.
+            // Screenshot hook: `-miseMoney transaction|transfer|all|budgets|bills|goals|reports|summary|uncategorized|review|extract|scan|pdf|csv|csvreview|holdings|applepay`, once per launch.
             if !debugOpened {
                 debugOpened = true
                 switch UserDefaults.standard.string(forKey: "miseMoney") {
@@ -195,6 +197,9 @@ struct FinanceView: View {
                         .min(by: { $0.name.localizedStandardCompare($1.name) == .orderedAscending }) {
                         receipt = (CSVImport.drafts(rows, mapping: CSVImport.guess(header: rows.first ?? []), account: account).drafts, source)
                     }
+                case "holdings":
+                    showingHoldings = accounts.filter { !$0.archived && $0.type == .brokerage }
+                        .min { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
                 #if os(iOS)
                 case "applepay": showingApplePay = true
                 #endif
