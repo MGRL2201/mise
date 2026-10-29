@@ -8,6 +8,9 @@ struct ReceiptScanTests {
         let text = await ReceiptScan.text(in: [TransactionReview.sampleSource()!.data])
         #expect(text.contains("TOAST BOX"))
         #expect(text.contains("7.40"))
+        // Label and amount sit in separate Vision observations; lines must be rebuilt from layout.
+        #expect(text.split(separator: "\n").contains { $0.contains("TOTAL") && $0.contains("7.40") })
+        #expect(TransactionExtraction.prepass(text, now: .now).total == Decimal(string: "7.40"))
     }
 
     @Test func skipsUnreadableImage() async {
