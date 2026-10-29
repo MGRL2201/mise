@@ -65,7 +65,11 @@ struct TransactionReviewView: View {
                         updated.categoryIsAuto = drafts[index].categoryIsAuto
                     }
                     drafts[index] = updated
-                    if isDuplicate(updated) { duplicates.insert(updated.id) } else { duplicates.remove(updated.id) }
+                    if TransactionReview.repeats(drafts).contains(updated.id) || isDuplicate(updated) {
+                        duplicates.insert(updated.id)
+                    } else {
+                        duplicates.remove(updated.id)
+                    }
                 }
             }
             .alert("Import failed", isPresented: Binding { error != nil } set: { if !$0 { error = nil } }) {
@@ -129,7 +133,8 @@ struct TransactionReviewView: View {
         let fallback = choices(accounts, keeping: []).first
         for index in drafts.indices where drafts[index].account == nil { drafts[index].account = fallback }
 
-        for index in drafts.indices where isDuplicate(drafts[index]) {
+        let repeats = TransactionReview.repeats(drafts)
+        for index in drafts.indices where repeats.contains(drafts[index].id) || isDuplicate(drafts[index]) {
             duplicates.insert(drafts[index].id)
             drafts[index].selected = false
         }
