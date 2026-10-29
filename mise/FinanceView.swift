@@ -374,6 +374,7 @@ struct AccountEditor: View {
             && (account.outgoingTransfers ?? []).isEmpty
             && (account.incomingTransfers ?? []).isEmpty
             && (account.bills ?? []).isEmpty
+            && (account.holdings ?? []).isEmpty
     }
 
     var body: some View {
@@ -407,7 +408,7 @@ struct AccountEditor: View {
                                 }
                         }
                     } footer: {
-                        if !canDelete { Text("Accounts with transactions or bills can be archived, not deleted.") }
+                        if !canDelete { Text("Accounts with transactions, bills or holdings can be archived, not deleted.") }
                     }
                 }
             }
@@ -450,6 +451,12 @@ struct AccountDetailView: View {
     @State private var payingCard = false
     @State private var editingTransaction: Transaction?
     @State private var editingTransfer: Transfer?
+    @State private var newHolding = false
+    @State private var editingHolding: Holding?
+    @State private var pricingHolding: Holding?
+    @State private var exportDocument: CSVDocument?
+    @State private var exportError: String?
+    @AppStorage(FX.homeKey) private var home = FX.home()
 
     init(account: Account, rates: FXRates) {
         self.account = account
@@ -482,6 +489,9 @@ struct AccountDetailView: View {
                     if account.type == .credit {
                         Button("Pay Card", systemImage: "creditcard") { payingCard = true }
                     }
+                    if account.type == .brokerage {
+                        Button("New Holding", systemImage: "chart.line.uptrend.xyaxis") { newHolding = true }
+                    }
                 }
             }
             ToolbarItem(placement: .primaryAction) { Button("Edit") { editing = true } }
@@ -494,18 +504,60 @@ struct AccountDetailView: View {
         .sheet(isPresented: $payingCard, onDismiss: reloadRates) { TransferEditor(transfer: nil, to: account) }
         .sheet(item: $editingTransaction, onDismiss: reloadRates) { TransactionEditor(transaction: $0) }
         .sheet(item: $editingTransfer, onDismiss: reloadRates) { TransferEditor(transfer: $0) }
+        .sheet(isPresented: $newHolding, onDismiss: reloadRates) { HoldingEditor(holding: nil, account: account) }
+        .sheet(item: $editingHolding, onDismiss: reloadRates) { HoldingEditor(holding: $0, account: account) }
+        .sheet(item: $pricingHolding, onDismiss: reloadRates) { PriceEditor(holding: $0) }
+        .fileExporter(
+            isPresented: Binding { exportDocument != nil } set: { if !$0 { exportDocument = nil } },
+            document: exportDocument, contentType: .commaSeparatedText, defaultFilename: CSVExport.filename("holdings")
+        ) { result in
+            if case .failure(let error) = result { exportError = error.localizedDescription }
+        }
+        .alert(
+            "Export failed",
+            isPresented: Binding { exportError != nil } set: { if !$0 { exportError = nil } }
+        ) {} message: {
+            Text(exportError ?? "")
+        }
     }
 
     private var form: some View {
         let days = Accounts.days(account.transactions ?? [])
         let transfers = ((account.outgoingTransfers ?? []) + (account.incomingTransfers ?? [])).sorted { $0.date > $1.date }
+        let holdings = (account.holdings ?? [])
+            .sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+        let showsHoldings = account.type == .brokerage || !holdings.isEmpty
+        let summary = Holdings.summary(holdings, rates: rates, home: home)
         return Form {
             Section {
-                LabeledContent("Balance") {
+                LabeledContent(showsHoldings ? "Cash" : "Balance") {
                     Text(Finance.balance(of: account, rates: rates), format: .currency(code: account.currency))
                 }
             }
             .listRowBackground(Color(theme.surface))
+            if showsHoldings {
+                Section("Holdings") {
+                    if holdings.isEmpty {
+                        Text("No holdings yet").foregroundStyle(.secondary)
+                    } else {
+                        LabeledContent("Value", value: summary.value, format: .currency(code: home))
+                        LabeledContent("Gain/Loss") {
+                            Text(summary.gain, format: .currency(code: home)).foregroundStyle(summary.gain < 0 ? .red : .green)
+                        }
+                        if summary.unpriced > 0 {
+                            Text("\(summary.unpriced) without price (not in totals)").foregroundStyle(.secondary)
+                        }
+                        ForEach(summary.unconverted.filter { $0.value != 0 }.sorted { $0.key < $1.key }, id: \.key) { code, amount in
+                            Text("\(amount.formatted(.currency(code: code))) (no rate)").foregroundStyle(.secondary)
+                        }
+                        ForEach(holdings) { HoldingRow(holding: $0, editing: $editingHolding, pricing: $pricingHolding) }
+                    }
+                    Button("Add Holding") { newHolding = true }
+                    Button("Export All Holdings (CSV)", action: exportHoldings)
+                        .disabled(((try? modelContext.fetchCount(FetchDescriptor<Holding>())) ?? 0) == 0)
+                }
+                .listRowBackground(Color(theme.surface))
+            }
             if days.isEmpty {
                 Section { Text("No transactions yet").foregroundStyle(.secondary) }
                     .listRowBackground(Color(theme.surface))
@@ -524,6 +576,20 @@ struct AccountDetailView: View {
             }
         }
         .navigationTitle(account.name)
+    }
+
+    /// Every holding in the store, by account then symbol. Rows read models on main; encoding runs off.
+    private func exportHoldings() {
+        let all = ((try? modelContext.fetch(FetchDescriptor<Holding>())) ?? []).sorted {
+            let byAccount = ($0.account?.name ?? "").localizedStandardCompare($1.account?.name ?? "")
+            return byAccount == .orderedSame
+                ? $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+                : byAccount == .orderedAscending
+        }
+        let rows = CSVExport.holdingRows(all, rates: rates, homeCurrency: home)
+        Task {
+            exportDocument = CSVDocument(data: await Task.detached { CSVExport.encode(rows) }.value)
+        }
     }
 
     private func transferRow(_ transfer: Transfer) -> some View {
