@@ -7,38 +7,47 @@ enum CSVImport {
     /// UTF-8 (else Windows-1252), BOM stripped, delimiter "," ";" or tab picked from the first line.
     /// Quoted fields may hold delimiters, "" and newlines; CRLF/LF/CR records; all-blank rows dropped.
     nonisolated static func rows(_ data: Data) -> [[String]] {
-        let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .windowsCP1252) ?? ""
+        let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .windowsCP1252)
+            ?? String(decoding: data, as: UTF8.self)
         // Unicode scalars, not Characters: "\r\n" is one Character.
         let scalars = text.unicodeScalars.first == "\u{FEFF}" ? text.unicodeScalars.dropFirst() : text.unicodeScalars[...]
 
-        var counts: [Unicode.Scalar: Int] = [:]
-        var quoted = false
-        for s in scalars {
-            if s == "\"" { quoted.toggle() }
-            else if !quoted, s == "\n" || s == "\r" { break }
-            else if !quoted { counts[s, default: 0] += 1 }
-        }
+        // A quote opens quoted mode only at the start of a field; elsewhere it is literal.
         let candidates: [Unicode.Scalar] = [",", ";", "\t"]
+        var counts: [Unicode.Scalar: Int] = [:]
+        var quoted = false, wasQuoted = false, previous: Unicode.Scalar?
+        for s in scalars {
+            let atStart = previous.map { candidates.contains($0) } ?? true
+            if s == "\"", quoted || atStart || wasQuoted && previous == "\"" { quoted.toggle(); wasQuoted = true }
+            else if !quoted, s == "\n" || s == "\r" { break }
+            else if !quoted { counts[s, default: 0] += 1; if candidates.contains(s) { wasQuoted = false } }
+            previous = s
+        }
         let delimiter = candidates.max { counts[$0, default: 0] < counts[$1, default: 0] }!  // ties keep the first: ","
 
         var rows: [[String]] = [], row: [String] = [], field = String.UnicodeScalarView()
-        var previous: Unicode.Scalar?
+        previous = nil
         quoted = false
-        func endRow() {
+        wasQuoted = false
+        func endField() {
             row.append(String(field))
             field = String.UnicodeScalarView()
+            wasQuoted = false
+        }
+        func endRow() {
+            endField()
             if row.contains(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) { rows.append(row) }
             row = []
         }
         for s in scalars {
-            if s == "\"" {
-                if !quoted, previous == "\"" { field.append(s) }  // "" inside a quoted field
-                quoted.toggle()
+            if s == "\"", quoted || field.isEmpty && !wasQuoted {
+                quoted.toggle(); wasQuoted = true
+            } else if s == "\"", wasQuoted, previous == "\"" {
+                field.append(s); quoted = true  // "" inside a quoted field
             } else if quoted {
                 field.append(s)
             } else if s == delimiter {
-                row.append(String(field))
-                field = String.UnicodeScalarView()
+                endField()
             } else if s == "\r" || s == "\n" {
                 if !(s == "\n" && previous == "\r") { endRow() }
             } else {
@@ -50,22 +59,35 @@ enum CSVImport {
         return rows
     }
 
-    /// Strips currency symbols/codes, spaces and ' grouping. Negative: leading - or −, trailing -, or (parentheses).
-    /// decimalComma: "1.234,56"; else "1,234.56". nil for blank, no digits or leftover junk.
+    /// Strips spaces, currency symbols and ' grouping anywhere; letters only at the ends (ISO code or ≤2 letters, e.g. "S$").
+    /// Negative: leading - or −, trailing -, (parentheses) or DR; CR forces positive.
+    /// decimalComma: "1.234,56"; else "1,234.56". nil for blank, malformed grouping/decimal or leftover junk.
     nonisolated static func amount(_ text: String, decimalComma: Bool) -> Decimal? {
-        var s = String(text.unicodeScalars.filter {
-            !(CharacterSet.letters.contains($0) || CharacterSet.whitespacesAndNewlines.contains($0)
+        let stripped = String(text.unicodeScalars.filter {
+            !(CharacterSet.whitespacesAndNewlines.contains($0)
               || $0.properties.generalCategory == .currencySymbol || "'’".unicodeScalars.contains($0))
         })
+        guard let parts = stripped.wholeMatch(of: /(\p{L}*)(.*?)(\p{L}*)/)?.output else { return nil }
+        var s = String(parts.2), forced: Bool?
+        for code in [parts.1, parts.3].map({ $0.uppercased() }) where !code.isEmpty {
+            switch code {
+            case "DR": forced = true
+            case "CR": forced = false
+            case _ where code.count <= 2 || Locale.commonISOCurrencyCodes.contains(code): break
+            default: return nil
+            }
+        }
         var negative = false
         if s.hasPrefix("("), s.hasSuffix(")") { negative = true; s = String(s.dropFirst().dropLast()) }
         if let sign = s.first, "-−+".contains(sign) { negative = negative || sign != "+"; s.removeFirst() }
         else if s.hasSuffix("-") { negative = true; s.removeLast() }
+        let shape = decimalComma ? /[0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]*)?|[0-9]+(?:,[0-9]*)?|,[0-9]+/
+                                 : /[0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]*)?|[0-9]+(?:\.[0-9]*)?|\.[0-9]+/
+        guard s.wholeMatch(of: shape) != nil else { return nil }
         s.removeAll { $0 == (decimalComma ? "." : ",") }
         if decimalComma { s = s.replacingOccurrences(of: ",", with: ".") }
-        guard s.wholeMatch(of: /\d+(\.\d*)?|\.\d+/) != nil,
-              let value = Decimal(string: s, locale: Locale(identifier: "en_US_POSIX")) else { return nil }
-        return negative ? -value : value
+        guard let value = Decimal(string: s, locale: Locale(identifier: "en_US_POSIX")) else { return nil }
+        return (forced ?? negative) ? -value : value
     }
 
     /// Strict POSIX parse in the current time zone. Falls back to the leading whitespace-separated components

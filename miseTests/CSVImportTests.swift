@@ -25,6 +25,8 @@ struct CSVImportTests {
                               ["2026-10-02", "Say \"hi\"", "3"],
                               ["2026-10-03", "line1\r\nline2", "1"]])
         #expect(rows("a,b\rc,d\ne,\"\"") == [["a", "b"], ["c", "d"], ["e", ""]])
+        #expect(rows("Date,Desc,Amount\n2026-10-01,Monitor 27\" screen,-10.00\n2026-10-02,Coffee,-5.00\n")
+                == [["Date", "Desc", "Amount"], ["2026-10-01", "Monitor 27\" screen", "-10.00"], ["2026-10-02", "Coffee", "-5.00"]])
     }
 
     @Test func rowsDetectDelimiter() {
@@ -51,6 +53,15 @@ struct CSVImportTests {
         #expect(a("abc") == nil)
         #expect(a("1.2.3") == nil)
         #expect(a("12*3") == nil)
+        #expect(a("100.00 DR") == -100)
+        #expect(a("100.00 CR") == 100)
+        #expect(a("SGD 7.00") == 7)
+        #expect(a("12,50 €", true) == Decimal(string: "12.5"))
+        for junk in ["12abc34", "Ref 123", "1E5", "1٢", "1,2,3"] { #expect(a(junk) == nil, "\(junk)") }
+        #expect(a("1,50") == nil)
+        #expect(a("1,234.56", true) == nil)
+        #expect(a("1,234") == 1234)
+        #expect(a("1.234", true) == 1234)
     }
 
     @Test func dateFormats() {
