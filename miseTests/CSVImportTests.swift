@@ -141,4 +141,17 @@ struct CSVImportTests {
         #expect(dbs.amount == nil && dbs.debit == 2 && dbs.credit == 3 && dbs.description == 1)
         #expect(CSVImport.guess(header: ["DATE", "AMOUNT", "MERCHANT"]).amount == 1)
     }
+
+    #if DEBUG
+    @Test func sampleCSVShowsSkipAndRepeat() {
+        let account = Account(name: "DBS", type: .debit, currency: "SGD")
+        context.insert(account)
+        let rows = CSVImport.rows(CSVImport.sampleCSVSource().data)
+        let result = CSVImport.drafts(rows, mapping: CSVImport.guess(header: rows[0]), account: account)
+        #expect(result.drafts.count == 7 && result.skipped == 1)
+        #expect(result.drafts.contains { $0.merchant == "Cold Storage, Raffles" && $0.amount == Decimal(string: "-46.20") })
+        #expect(result.drafts.contains { $0.amount > 0 } && result.drafts.contains { $0.currency == "USD" })
+        #expect(TransactionReview.repeats(result.drafts).count == 1)
+    }
+    #endif
 }
