@@ -402,5 +402,20 @@ extension TransactionReview {
         CGImageDestinationAddImage(destination, image, nil)
         return CGImageDestinationFinalize(destination) ? ReviewSource(data: data as Data, filename: "receipt.png") : nil
     }
+
+    /// OCR-style receipt text for `-miseMoney extract`.
+    static let sampleReceiptText = """
+    TOAST BOX
+    Raffles Place
+    GST Reg No: 200012345K
+    25/10/2026 08:14
+    Kaya Toast Set        4.60
+    Kopi C                1.80
+    Soft-boiled Eggs      1.00
+    SUBTOTAL              6.79
+    GST 9%                0.61
+    TOTAL            S$ 7.40
+    VISA ****1234
+    """
 }
 #endif

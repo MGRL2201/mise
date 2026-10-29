@@ -26,6 +26,7 @@ struct FinanceView: View {
     @State private var showingSummary = false
     @State private var showingUncategorized = false
     @State private var showingReview = false
+    @State private var extracted: [DraftTransaction]?
     #if os(iOS)
     @State private var showingApplePay = false
     #endif
@@ -72,6 +73,9 @@ struct FinanceView: View {
         .sheet(isPresented: $showingReview) {
             TransactionReviewView(drafts: TransactionReview.sampleDrafts(accounts: accounts), source: TransactionReview.sampleSource())
         }
+        .sheet(isPresented: Binding { extracted != nil } set: { if !$0 { extracted = nil } }) {
+            TransactionReviewView(drafts: extracted ?? [], source: nil)
+        }
         #if os(iOS)
         .navigationDestination(isPresented: $showingApplePay) { ApplePaySettingsView() }
         #endif
@@ -87,7 +91,7 @@ struct FinanceView: View {
         .onAppear {
             if accounts.isEmpty && !confirmed { askHome = true }
             #if DEBUG
-            // Screenshot hook: `-miseMoney transaction|transfer|all|budgets|bills|goals|reports|summary|uncategorized|review|applepay`, once per launch.
+            // Screenshot hook: `-miseMoney transaction|transfer|all|budgets|bills|goals|reports|summary|uncategorized|review|extract|applepay`, once per launch.
             if !debugOpened {
                 debugOpened = true
                 switch UserDefaults.standard.string(forKey: "miseMoney") {
@@ -101,6 +105,11 @@ struct FinanceView: View {
                 case "summary": showingSummary = true
                 case "uncategorized": showingUncategorized = true
                 case "review": showingReview = true
+                case "extract":
+                    Task {
+                        let categories = (try? modelContext.fetch(FetchDescriptor<Category>())) ?? []
+                        extracted = await TransactionExtraction.extract(TransactionReview.sampleReceiptText, categories: categories)
+                    }
                 #if os(iOS)
                 case "applepay": showingApplePay = true
                 #endif
