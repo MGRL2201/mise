@@ -16,6 +16,7 @@ enum ReceiptScan {
             var request = RecognizeTextRequest()
             request.recognitionLevel = .accurate
             request.usesLanguageCorrection = true
+            request.automaticallyDetectsLanguage = true // default is en-US only; CJK receipts need detection
             guard let observations = try? await request.perform(on: image, orientation: orientation) else { continue }
             let page = observations.compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
             if !page.isEmpty { pages.append(page) }

@@ -13,4 +13,10 @@ struct ReceiptScanTests {
     @Test func skipsUnreadableImage() async {
         #expect(await ReceiptScan.text(in: [Data()]) == "")
     }
+
+    @Test func blankOCRGivesOneEmptyDraft() async {
+        let drafts = await ReceiptScan.drafts(from: [Data()], categories: [])
+        #expect(drafts.count == 1)
+        #expect(drafts.first?.amount == 0)
+    }
 }
