@@ -9,7 +9,7 @@ enum ApplePay {
 
     // ponytail: fixed symbol list; extend when real automation values show others.
     // Order matters: "US$" before "S$", "CA$" before "A$". Bare "$"/"¥" resolve via fallback.
-    private static let symbols = [("US$", "USD"), ("S$", "SGD"), ("HK$", "HKD"), ("NZ$", "NZD"), ("CA$", "CAD"),
+    static let symbols = [("US$", "USD"), ("S$", "SGD"), ("HK$", "HKD"), ("NZ$", "NZD"), ("CA$", "CAD"),
                                   ("A$", "AUD"), ("JP¥", "JPY"), ("CN¥", "CNY"), ("€", "EUR"), ("£", "GBP"),
                                   ("₹", "INR"), ("RM", "MYR")]
     private static let dollarCurrencies: Set = ["USD", "SGD", "AUD", "CAD", "NZD", "HKD"]
