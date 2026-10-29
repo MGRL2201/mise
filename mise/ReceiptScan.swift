@@ -20,12 +20,23 @@ enum ReceiptScan {
             guard let observations = try? await request.perform(on: image, orientation: orientation) else { continue }
             // Vision splits receipt columns ("TOTAL" | "7.40") into separate observations; rebuild lines from layout
             // (normalized coords, origin bottom-left) so the line-based prepass sees label and amount together.
-            // ponytail: rows grouped by midY within half the row's first box height; skewed/tilted photos may merge
-            // or split rows. Upgrade: group along the text baseline angle.
+            // Tilted photos (fileImporter images aren't deskewed) drift the amount column into the next row, so rows
+            // run along the median text slope. Short boxes ("TOTAL", "7.40") come back axis-aligned; only the wider
+            // half votes. RecognizeDocumentsRequest (iOS 26) keeps label and amount on separate lines, so no help.
+            // ponytail: one straight slope per page; large tilt or curled/creased paper can still mis-pair label and
+            // amount. Upgrade: per-row baseline fit, or perspective-correct with DetectDocumentSegmentationRequest.
+            let slopes = observations.sorted { $0.boundingBox.cgRect.width > $1.boundingBox.cgRect.width }
+                .prefix(max(1, observations.count / 2))
+                .compactMap { $0.topRight.x > $0.topLeft.x ? ($0.topRight.y - $0.topLeft.y) / ($0.topRight.x - $0.topLeft.x) : nil }
+                .sorted()
+            let slope = slopes.isEmpty ? 0 : slopes[slopes.count / 2]
+            func level(_ observation: RecognizedTextObservation) -> CGFloat {
+                observation.boundingBox.cgRect.midY - slope * observation.boundingBox.cgRect.midX
+            }
             var rows: [[RecognizedTextObservation]] = []
-            for observation in observations.sorted(by: { $0.boundingBox.cgRect.midY > $1.boundingBox.cgRect.midY }) {
-                if let first = rows.last?.first,
-                   abs(first.boundingBox.cgRect.midY - observation.boundingBox.cgRect.midY) <= first.boundingBox.cgRect.height / 2 {
+            for observation in observations.sorted(by: { level($0) > level($1) }) {
+                if let first = rows.last?.first, abs(level(first) - level(observation))
+                    <= min(first.boundingBox.cgRect.height, observation.boundingBox.cgRect.height) / 2 {
                     rows[rows.count - 1].append(observation)
                 } else {
                     rows.append([observation])
@@ -33,7 +44,7 @@ enum ReceiptScan {
             }
             let page = rows.map { row in
                 row.sorted { $0.boundingBox.cgRect.minX < $1.boundingBox.cgRect.minX }
-                    .compactMap { $0.topCandidates(1).first?.string }.joined(separator: "  ")
+                    .compactMap { $0.topCandidates(1).first?.string }.joined(separator: " ")
             }.joined(separator: "\n")
             if !page.isEmpty { pages.append(page) }
         }
