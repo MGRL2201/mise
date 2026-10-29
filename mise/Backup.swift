@@ -126,6 +126,8 @@ struct Backup: Codable {
         var price: Decimal?
         var priceDate: Date?
         var createdAt: Date
+        /// Optional: files before #49 lack it.
+        var coinID: String?
     }
 
     struct NetWorthSnapshotRecord: Codable {
@@ -236,7 +238,7 @@ enum BackupService {
         let holdings = try context.fetch(FetchDescriptor<Holding>()).map {
             Backup.HoldingRecord(id: $0.id, accountID: $0.account?.id, kind: $0.kind, symbol: $0.symbol, name: $0.name,
                                  quantity: $0.quantity, costBasis: $0.costBasis, currency: $0.currency,
-                                 price: $0.price, priceDate: $0.priceDate, createdAt: $0.createdAt)
+                                 price: $0.price, priceDate: $0.priceDate, createdAt: $0.createdAt, coinID: $0.coinID)
         }
         var settings: [String: Any] = [:]
         for key in Backup.settingsKeys { settings[key] = defaults.object(forKey: key) }
@@ -391,6 +393,7 @@ enum BackupService {
                     holding.price = record.price
                     holding.priceDate = record.priceDate
                     holding.createdAt = record.createdAt
+                    holding.coinID = record.coinID
                     context.insert(holding)
                     holding.account = record.accountID.flatMap { accounts[$0] }
                 }

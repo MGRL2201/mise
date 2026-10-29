@@ -32,6 +32,8 @@ final class Holding {
     /// price fetchers (#49 CoinGecko, #50 stocks) write the same two fields.
     var price: Decimal?
     var priceDate: Date?
+    /// CoinGecko coin id (#49). Set => price is auto-fetched and overwrites the manual price.
+    var coinID: String?
     var createdAt: Date = Date()
 
     init(symbol: String, name: String, kind: HoldingKind, quantity: Decimal, costBasis: Decimal, currency: String) {

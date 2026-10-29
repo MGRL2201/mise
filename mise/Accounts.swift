@@ -83,6 +83,7 @@ extension Accounts {
             let holding = Holding(symbol: symbol, name: name, kind: kind, quantity: Decimal(string: quantity)!, costBasis: cost, currency: currency)
             context.insert(holding)
             holding.account = ibkr
+            if symbol == "BTC" { holding.coinID = "bitcoin" }
             if let price {
                 holding.price = Decimal(string: price)
                 holding.priceDate = .now - daysAgo * 86_400
