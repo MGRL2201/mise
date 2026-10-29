@@ -100,7 +100,7 @@ struct FinanceView: View {
         .navigationDestination(isPresented: $showingReports) { ReportsView() }
         .navigationDestination(isPresented: $showingSummary) { MonthSummaryView(month: .now) }
         .navigationDestination(isPresented: $showingUncategorized) { UncategorizedView() }
-        .navigationDestination(item: $showingHoldings) { AccountDetailView(account: $0, rates: rates) }
+        .navigationDestination(item: $showingHoldings) { AccountDetailView(account: $0, rates: .load()) }
         .sheet(isPresented: $showingReview) {
             TransactionReviewView(drafts: TransactionReview.sampleDrafts(accounts: accounts), source: TransactionReview.sampleSource())
         }
