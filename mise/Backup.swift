@@ -36,6 +36,8 @@ struct Backup: Codable {
     var goals: [GoalRecord]?
     /// Optional: files before #40 lack them.
     var netWorthSnapshots: [NetWorthSnapshotRecord]?
+    /// Optional: files before #48 lack them.
+    var holdings: [HoldingRecord]?
 
     struct AccountRecord: Codable {
         var id: UUID
@@ -109,6 +111,20 @@ struct Backup: Codable {
         var targetDate: Date?
         var accountID: UUID?
         var contributions: [GoalContribution]
+        var createdAt: Date
+    }
+
+    struct HoldingRecord: Codable {
+        var id: UUID
+        var accountID: UUID?
+        var kind: HoldingKind
+        var symbol: String
+        var name: String
+        var quantity: Decimal
+        var costBasis: Decimal
+        var currency: String
+        var price: Decimal?
+        var priceDate: Date?
         var createdAt: Date
     }
 
@@ -217,6 +233,11 @@ enum BackupService {
         let netWorthSnapshots = try context.fetch(FetchDescriptor<NetWorthSnapshot>()).map {
             Backup.NetWorthSnapshotRecord(id: $0.id, date: $0.date, total: $0.total, currency: $0.currency)
         }
+        let holdings = try context.fetch(FetchDescriptor<Holding>()).map {
+            Backup.HoldingRecord(id: $0.id, accountID: $0.account?.id, kind: $0.kind, symbol: $0.symbol, name: $0.name,
+                                 quantity: $0.quantity, costBasis: $0.costBasis, currency: $0.currency,
+                                 price: $0.price, priceDate: $0.priceDate, createdAt: $0.createdAt)
+        }
         var settings: [String: Any] = [:]
         for key in Backup.settingsKeys { settings[key] = defaults.object(forKey: key) }
         return try JSONEncoder().encode(Backup(
@@ -224,7 +245,7 @@ enum BackupService {
             settings: PropertyListSerialization.data(fromPropertyList: settings, format: .binary, options: 0),
             tags: tags, taskExtras: taskExtras, wakeAlarms: wakeAlarms, wakeLogs: wakeLogs,
             accounts: accounts, categories: categories, transactions: transactions, transfers: transfers,
-            bills: bills, goals: goals, netWorthSnapshots: netWorthSnapshots))
+            bills: bills, goals: goals, netWorthSnapshots: netWorthSnapshots, holdings: holdings))
     }
 
     static func restore(_ data: Data, context: ModelContext, files: AttachmentFileStore, defaults: UserDefaults) throws {
@@ -295,6 +316,7 @@ enum BackupService {
                 try context.fetch(FetchDescriptor<Transfer>()).forEach(context.delete)
                 try context.fetch(FetchDescriptor<Bill>()).forEach(context.delete)
                 try context.fetch(FetchDescriptor<Goal>()).forEach(context.delete)
+                try context.fetch(FetchDescriptor<Holding>()).forEach(context.delete)
                 try context.fetch(FetchDescriptor<Category>()).forEach(context.delete)
                 try context.fetch(FetchDescriptor<Account>()).forEach(context.delete)
                 var accounts: [UUID: Account] = [:]
@@ -361,6 +383,16 @@ enum BackupService {
                     goal.createdAt = record.createdAt
                     context.insert(goal)
                     goal.account = record.accountID.flatMap { accounts[$0] }
+                }
+                for record in backup.holdings ?? [] {
+                    let holding = Holding(symbol: record.symbol, name: record.name, kind: record.kind,
+                                          quantity: record.quantity, costBasis: record.costBasis, currency: record.currency)
+                    holding.id = record.id
+                    holding.price = record.price
+                    holding.priceDate = record.priceDate
+                    holding.createdAt = record.createdAt
+                    context.insert(holding)
+                    holding.account = record.accountID.flatMap { accounts[$0] }
                 }
             }
             if let snapshots = backup.netWorthSnapshots {

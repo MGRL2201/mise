@@ -45,6 +45,18 @@ struct ReportsTests {
         #expect(all.map(\.total) == [150, 150])
     }
 
+    @Test func netWorthIncludesPricedHoldings() throws {
+        let broker = Account(name: "IBKR", type: .brokerage, currency: "SGD", openingBalance: 1000)
+        let holding = Holding(symbol: "VT", name: "Vanguard Total World", kind: .stock, quantity: 3, costBasis: 250, currency: "SGD")
+        holding.price = 100
+        context.insert(broker)
+        context.insert(holding)
+        holding.account = broker
+
+        record(date(1, hour: 9))
+        #expect(try snapshots().first?.total == 1300)
+    }
+
     @Test func noAccountsNoSnapshot() throws {
         record(date(1, hour: 9))
         #expect(try snapshots().isEmpty)
