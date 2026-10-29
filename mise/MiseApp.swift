@@ -48,6 +48,7 @@ struct MiseApp: App {
                         Task { await DailyPlanning.sync(prompt: false) }
                         Task { await WeeklyReview.sync(prompt: false) }
                         Task { await Bills.sync(context: container.mainContext, prompt: false) }
+                        Task { await MonthSummary.sync(prompt: false) }
                         #if os(iOS)
                         Self.recordSpikeLaunch()
                         Task { await WakeAlarms.sync((try? container.mainContext.fetch(FetchDescriptor<WakeAlarm>())) ?? []) }

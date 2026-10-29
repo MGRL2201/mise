@@ -14,6 +14,7 @@ struct FinanceView: View {
     @State private var newTransfer = false
     @State private var askHome = false
     @Bindable private var billPrompt = BillPrompt.shared
+    @Bindable private var summaryPrompt = MonthSummaryPrompt.shared
     #if DEBUG
     @State private var debugOpened = false
     @State private var showingAll = false
@@ -21,6 +22,7 @@ struct FinanceView: View {
     @State private var showingBills = false
     @State private var showingGoals = false
     @State private var showingReports = false
+    @State private var showingSummary = false
     @State private var showingUncategorized = false
     #if os(iOS)
     @State private var showingApplePay = false
@@ -63,6 +65,7 @@ struct FinanceView: View {
         .navigationDestination(isPresented: $showingBills) { BillsView() }
         .navigationDestination(isPresented: $showingGoals) { GoalsView() }
         .navigationDestination(isPresented: $showingReports) { ReportsView() }
+        .navigationDestination(isPresented: $showingSummary) { MonthSummaryView(month: .now) }
         .navigationDestination(isPresented: $showingUncategorized) { UncategorizedView() }
         #if os(iOS)
         .navigationDestination(isPresented: $showingApplePay) { ApplePaySettingsView() }
@@ -70,6 +73,8 @@ struct FinanceView: View {
         #endif
         // A bill reminder tap lands here (ContentView switches to Money).
         .navigationDestination(isPresented: $billPrompt.isPresented) { BillsView() }
+        // A month-end summary tap lands here too.
+        .navigationDestination(item: $summaryPrompt.month) { MonthSummaryView(month: $0).id($0) }
         .sheet(isPresented: $isAdding) { AccountEditor(account: nil) }
         .sheet(isPresented: $newTransaction) { TransactionEditor(transaction: nil) }
         .sheet(isPresented: $newTransfer) { TransferEditor(transfer: nil) }
@@ -77,7 +82,7 @@ struct FinanceView: View {
         .onAppear {
             if accounts.isEmpty && !confirmed { askHome = true }
             #if DEBUG
-            // Screenshot hook: `-miseMoney transaction|transfer|all|budgets|bills|goals|reports|uncategorized|applepay`, once per launch.
+            // Screenshot hook: `-miseMoney transaction|transfer|all|budgets|bills|goals|reports|summary|uncategorized|applepay`, once per launch.
             if !debugOpened {
                 debugOpened = true
                 switch UserDefaults.standard.string(forKey: "miseMoney") {
@@ -88,6 +93,7 @@ struct FinanceView: View {
                 case "bills": showingBills = true
                 case "goals": showingGoals = true
                 case "reports": showingReports = true
+                case "summary": showingSummary = true
                 case "uncategorized": showingUncategorized = true
                 #if os(iOS)
                 case "applepay": showingApplePay = true
@@ -148,6 +154,7 @@ struct FinanceView: View {
                 NavigationLink("Bills") { BillsView() }
                 NavigationLink("Goals") { GoalsView() }
                 NavigationLink("Reports") { ReportsView() }
+                NavigationLink("Month Summary") { MonthSummaryView(month: month) }
                 #if os(iOS)  // Shortcuts Transaction automations are iPhone-only; settings live in local UserDefaults
                 NavigationLink("Apple Pay") { ApplePaySettingsView() }
                 #endif
