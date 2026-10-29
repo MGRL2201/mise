@@ -38,6 +38,9 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate {
             await MainActor.run { WakePrompt.shared.show() }
         } else if id.hasPrefix(Bills.prefix) {
             await MainActor.run { BillPrompt.shared.show() }
+        } else if id.hasPrefix(MonthSummary.prefix) {
+            let delivered = response.notification.date  // the target month's last day
+            await MainActor.run { MonthSummaryPrompt.shared.show(month: delivered) }
         }
     }
 

@@ -12,7 +12,8 @@ struct Backup: Codable {
                                 "travel.transport", "travel.buffer", "planning.workStart", "planning.workEnd", "planning.workDays",
                                 "planning.daily", "planning.dailyTime",
                                 "planning.weekly", "planning.weeklyDay", "planning.weeklyTime", "wake.phrase",
-                                "finance.homeCurrency", "finance.merchantRules", "finance.cardAccounts", "finance.applePayDefault"]
+                                "finance.homeCurrency", "finance.merchantRules", "finance.cardAccounts", "finance.applePayDefault",
+                                "finance.monthEnd", "finance.monthEndTime"]
 
     var version: Int
     var createdAt: Date
