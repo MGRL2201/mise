@@ -403,6 +403,35 @@ extension TransactionReview {
         return CGImageDestinationFinalize(destination) ? ReviewSource(data: data as Data, filename: "receipt.png") : nil
     }
 
+    /// One-page utility invoice PDF with a real (Core Text) text layer; `scanned`
+    /// instead wraps the sample receipt PNG in an image-only page (no text layer, needs OCR).
+    @MainActor
+    static func samplePDF(scanned: Bool = false) -> ReviewSource? {
+        var image: CGImage?
+        if scanned {
+            guard let png = sampleSource()?.data, let source = CGImageSourceCreateWithData(png as CFData, nil) else { return nil }
+            image = CGImageSourceCreateImageAtIndex(source, 0, nil)
+        }
+        let data = NSMutableData()
+        var box = image.map { CGRect(x: 0, y: 0, width: $0.width / 2, height: $0.height / 2) } ?? CGRect(x: 0, y: 0, width: 595, height: 842)
+        guard let consumer = CGDataConsumer(data: data), let context = CGContext(consumer: consumer, mediaBox: &box, nil) else { return nil }
+        context.beginPDFPage(nil)
+        if let image {
+            context.draw(image, in: box)
+        } else {
+            let font = CTFontCreateWithName("Helvetica" as CFString, 14, nil)
+            let lines = ["SP GROUP", "Tax Invoice", "Invoice date: 27 Oct 2026", "Account no: 8812345678",
+                         "Electricity  96.40", "Water  32.10", "Total amount due  S$ 128.50"]
+            for (index, line) in lines.enumerated() {
+                context.textPosition = CGPoint(x: 50, y: 780 - CGFloat(index) * 24)
+                CTLineDraw(CTLineCreateWithAttributedString(NSAttributedString(string: line, attributes: [kCTFontAttributeName as NSAttributedString.Key: font])), context)
+            }
+        }
+        context.endPDFPage()
+        context.closePDF()
+        return ReviewSource(data: data as Data, filename: scanned ? "scan.pdf" : "invoice.pdf")
+    }
+
     /// OCR-style receipt text for `-miseMoney extract`.
     static let sampleReceiptText = """
     TOAST BOX

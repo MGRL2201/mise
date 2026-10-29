@@ -43,7 +43,7 @@ struct ReceiptScanTests {
     }
 
     @Test func blankOCRGivesOneEmptyDraft() async {
-        let drafts = await ReceiptScan.drafts(from: [Data()], categories: [])
+        let drafts = await ReceiptScan.drafts(text: "", categories: [])
         #expect(drafts.count == 1)
         #expect(drafts.first?.amount == 0)
     }

@@ -145,7 +145,7 @@ extension TransactionExtraction {
                       fallbackCurrency: fallbackCurrency, now: now, defaults: defaults)]
     }
 
-    /// Pre-pass + chunking off the main actor (long PDF text takes ~100 ms).
+    /// Pre-pass + chunking off the main actor (long PDF text).
     @concurrent private nonisolated static func scan(_ text: String, now: Date) async -> (Fields, [String]) {
         (prepass(text, now: now), chunks(text))
     }
@@ -177,6 +177,8 @@ extension TransactionExtraction {
                   !["", "nil", "null", "none", "n/a", "unknown"].contains(value.lowercased()) else { return nil }
             return value
         }
+        // ponytail: money scan of the full text stays on main; PDF import caps text at 5 pages so it stays small.
+        // Move tokens into `scan` if long text gets slow.
         let tokens = text.components(separatedBy: .newlines).flatMap(money)
         let amounts = Set(tokens.map(\.amount))
         let total = prepass.total ?? model.compactMap { clean($0.total).flatMap { ApplePay.parseAmount($0, fallback: "")?.amount } }

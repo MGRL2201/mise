@@ -251,7 +251,7 @@ struct FinanceView: View {
         readingReceipt = true
         Task {
             let categories = (try? modelContext.fetch(FetchDescriptor<Category>())) ?? []
-            receipt = (await ReceiptScan.drafts(from: pages, categories: categories), source)
+            receipt = (await ReceiptScan.drafts(text: await ReceiptScan.text(in: pages), categories: categories), source)
             readingReceipt = false
         }
     }
