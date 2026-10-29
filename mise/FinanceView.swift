@@ -18,7 +18,7 @@ struct FinanceView: View {
     @State private var newTransfer = false
     @State private var askHome = false
     @State private var scanning = false
-    @State private var importingReceipt = false
+    @State private var importing: UTType?
     @State private var readingReceipt = false
     @State private var receipt: (drafts: [DraftTransaction], source: ReviewSource)?
     @Bindable private var billPrompt = BillPrompt.shared
@@ -57,7 +57,7 @@ struct FinanceView: View {
         }
         .overlay {
             if readingReceipt {
-                ProgressView("Reading receipt…")
+                ProgressView("Reading…")
                     .padding()
                     .background(.regularMaterial, in: .rect(cornerRadius: 12))
             }
@@ -74,9 +74,11 @@ struct FinanceView: View {
                             #if os(iOS)
                             if VNDocumentCameraViewController.isSupported { scanning = true; return }
                             #endif
-                            importingReceipt = true
+                            importing = .image
                         }
                         .disabled(readingReceipt)
+                        Button("Import PDF", systemImage: "doc.richtext") { importing = .pdf }
+                            .disabled(readingReceipt)
                     }
                     .disabled(!accounts.contains { !$0.archived })
                     Button("New Account", systemImage: "banknote") { isAdding = true }
@@ -114,17 +116,22 @@ struct FinanceView: View {
             DocumentScanner { pages in
                 scanning = false
                 // ponytail: multi-page scans attach only the first page; combine into a PDF if needed.
-                if let first = pages.first { readReceipt(pages, source: ReviewSource(data: first, filename: "receipt.jpg")) }
+                if let first = pages.first { read(ReviewSource(data: first, filename: "receipt.jpg")) { await ReceiptScan.text(in: pages) } }
             }
             .ignoresSafeArea()
         }
         #endif
-        .fileImporter(isPresented: $importingReceipt, allowedContentTypes: [.image]) { result in
+        .fileImporter(isPresented: Binding { importing != nil } set: { if !$0 { importing = nil } }, allowedContentTypes: importing.map { [$0] } ?? [.image]) { result in
             guard let url = try? result.get() else { return }
             let accessing = url.startAccessingSecurityScopedResource()
             defer { if accessing { url.stopAccessingSecurityScopedResource() } }
             guard let data = try? Data(contentsOf: url) else { return }
-            readReceipt([data], source: ReviewSource(data: data, filename: url.lastPathComponent))
+            let source = ReviewSource(data: data, filename: url.lastPathComponent)
+            if UTType(filenameExtension: url.pathExtension)?.conforms(to: .pdf) == true {
+                read(source) { await PDFImport.text(in: data) }
+            } else {
+                read(source) { await ReceiptScan.text(in: [data]) }
+            }
         }
         .sheet(isPresented: Binding { receipt != nil } set: { if !$0 { receipt = nil } }) {
             TransactionReviewView(drafts: receipt?.drafts ?? [], source: receipt?.source)
@@ -132,7 +139,7 @@ struct FinanceView: View {
         .onAppear {
             if accounts.isEmpty && !confirmed { askHome = true }
             #if DEBUG
-            // Screenshot hook: `-miseMoney transaction|transfer|all|budgets|bills|goals|reports|summary|uncategorized|review|extract|scan|applepay`, once per launch.
+            // Screenshot hook: `-miseMoney transaction|transfer|all|budgets|bills|goals|reports|summary|uncategorized|review|extract|scan|pdf|applepay`, once per launch.
             if !debugOpened {
                 debugOpened = true
                 switch UserDefaults.standard.string(forKey: "miseMoney") {
@@ -152,7 +159,9 @@ struct FinanceView: View {
                         extracted = await TransactionExtraction.extract(TransactionReview.sampleReceiptText, categories: categories)
                     }
                 case "scan":
-                    if let source = TransactionReview.sampleSource() { readReceipt([source.data], source: source) }
+                    if let source = TransactionReview.sampleSource() { read(source) { await ReceiptScan.text(in: [source.data]) } }
+                case "pdf":
+                    if let source = TransactionReview.samplePDF() { read(source) { await PDFImport.text(in: source.data) } }
                 #if os(iOS)
                 case "applepay": showingApplePay = true
                 #endif
@@ -245,13 +254,13 @@ struct FinanceView: View {
         }
     }
 
-    /// OCR + extraction off the scan/import, then the review sheet (#45).
-    private func readReceipt(_ pages: [Data], source: ReviewSource) {
+    /// OCR/PDF text + extraction off the scan/import, then the review sheet (#45/#46).
+    private func read(_ source: ReviewSource, text: @escaping () async -> String) {
         guard !readingReceipt else { return }
         readingReceipt = true
         Task {
             let categories = (try? modelContext.fetch(FetchDescriptor<Category>())) ?? []
-            receipt = (await ReceiptScan.drafts(from: pages, categories: categories), source)
+            receipt = (await ReceiptScan.drafts(text: await text(), categories: categories), source)
             readingReceipt = false
         }
     }

@@ -4,7 +4,7 @@ import FoundationModels
 /// Transaction field extraction from OCR / PDF text (#44): deterministic pre-pass, then on-device model merge.
 enum TransactionExtraction {
     /// Fields read deterministically from receipt / bank-notice text. nil = not found (never guessed).
-    struct Fields: Equatable {
+    nonisolated struct Fields: Equatable, Sendable {
         var merchant: String?
         var date: Date?
         var total: Decimal?
@@ -12,7 +12,7 @@ enum TransactionExtraction {
     }
 
     /// Pure. `now` bounds dates (reject dates more than 1 day after now).
-    static func prepass(_ text: String, now: Date, calendar: Calendar = .current) -> Fields {
+    nonisolated static func prepass(_ text: String, now: Date, calendar: Calendar = .current) -> Fields {
         let lines = text.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }
         let tokens = lines.map(money)
         let all = tokens.joined()
@@ -41,7 +41,7 @@ enum TransactionExtraction {
     }
 
     /// `paid`: the second tier, "Total Paid" / "Amount Paid" lines.
-    private static func isTotalLine(_ line: String, paid: Bool = false) -> Bool {
+    nonisolated private static func isTotalLine(_ line: String, paid: Bool = false) -> Bool {
         func has(_ pattern: String) -> Bool { line.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil }
         return has(#"\b(total|amount|balance due)\b"#)  // also covers grand total, total due, amount due/payable
             && has(#"\bpaid\b"#) == paid
@@ -50,10 +50,10 @@ enum TransactionExtraction {
     }
 
     // ponytail: fixed allowlist (CUP/PEN/MOP are ISO codes and item words); extend as receipts show others.
-    private static let codes = Set(ApplePay.symbols.map(\.1)
+    nonisolated private static let codes = Set(ApplePay.symbols.map(\.1)
         + ["USD", "EUR", "GBP", "JPY", "CNY", "CHF", "THB", "IDR", "KRW", "TWD", "PHP", "VND"])
 
-    private static let moneyPattern: NSRegularExpression = {
+    nonisolated private static let moneyPattern: NSRegularExpression = {
         let symbols = (ApplePay.symbols.map(\.0) + ["$", "¥"]).map(NSRegularExpression.escapedPattern(for:))
             .joined(separator: "|")
         // [marker] number [marker]; not glued to letters/digits or part of a date/time/ID ("12/10", "13:05", "M2-0012345-6").
@@ -65,7 +65,7 @@ enum TransactionExtraction {
     private typealias Money = (amount: Decimal, currency: String?, marked: Bool, bare: String?)
 
     /// Money tokens on one line. Money = 2 decimals or a currency marker ("¥1,280"); "Qty 3", "Table 12" are not.
-    private static func money(_ line: String) -> [Money] {
+    nonisolated private static func money(_ line: String) -> [Money] {
         moneyPattern.matches(in: line, range: NSRange(line.startIndex..., in: line)).compactMap { match in
             func group(_ i: Int) -> String? { Range(match.range(at: i), in: line).map { String(line[$0]) } }
             // A 3-letter prefix/suffix is a marker only if allowlisted ("SGD 25.00", not "TAX 3.29" / "PAPER CUP 3.50").
@@ -80,12 +80,12 @@ enum TransactionExtraction {
         }
     }
 
-    private static let isoDate = try! NSRegularExpression(pattern: #"(?<![0-9])([0-9]{4})([-/])([0-9]{1,2})\2([0-9]{1,2})(?![0-9])"#)
-    private static let numericDate = try! NSRegularExpression(pattern: #"(?<![0-9A-Za-z.])([0-9]{1,2})([-/.])([0-9]{1,2})\2([0-9]{4}|[0-9]{2})(?![0-9])"#)
-    private static let detector = try! NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue)
+    nonisolated private static let isoDate = try! NSRegularExpression(pattern: #"(?<![0-9])([0-9]{4})([-/])([0-9]{1,2})\2([0-9]{1,2})(?![0-9])"#)
+    nonisolated private static let numericDate = try! NSRegularExpression(pattern: #"(?<![0-9A-Za-z.])([0-9]{1,2})([-/.])([0-9]{1,2})\2([0-9]{4}|[0-9]{2})(?![0-9])"#)
+    nonisolated private static let detector = try! NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue)
 
     /// Valid date candidates in text order, at noon in `calendar` (time of day unused; noon avoids day shifts).
-    private static func dates(in text: String, calendar: Calendar) -> [Date] {
+    nonisolated private static func dates(in text: String, calendar: Calendar) -> [Date] {
         let range = NSRange(text.startIndex..., in: text), nsText = text as NSString
         func int(_ match: NSTextCheckingResult, _ i: Int) -> Int { Int(nsText.substring(with: match.range(at: i)))! }
         var found = isoDate.matches(in: text, range: range).map {
@@ -121,6 +121,7 @@ extension TransactionExtraction {
                                    modelAvailable: Bool = OnDeviceAI.unavailableReason == nil) async -> [DraftTransaction] {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return [] }
+        let (fields, parts) = await scan(text, now: now)
         var model: [ExtractedTransaction] = []
         if modelAvailable {
             let names = categories.filter { !$0.isIncome }.map(\.name).joined(separator: ", ")
@@ -128,8 +129,9 @@ extension TransactionExtraction {
                 Extract the purchase from receipt or bank-notice text. \
                 Leave a field empty when the text does not state it; never guess.
                 """ + (names.isEmpty ? "" : "\nPick category from: \(names)")
-            // ponytail: one sequential call per chunk; cap the chunk count when long statements get slow.
-            for chunk in chunks(text) {
+            // ponytail: only the first 3 chunks (~6,000 chars) reach the model; the pre-pass still sees all text.
+            // Raise the cap if notices put totals later.
+            for chunk in parts.prefix(3) {
                 if Task.isCancelled { break }
                 let session = LanguageModelSession(instructions: instructions)
                 // English lead-in: a bare all-caps/numeric receipt fails language detection (unsupportedLanguageOrLocale).
@@ -139,12 +141,17 @@ extension TransactionExtraction {
                 }
             }
         }
-        return [draft(prepass: prepass(text, now: now), model: model, text: text, categories: categories,
+        return [draft(prepass: fields, model: model, text: text, categories: categories,
                       fallbackCurrency: fallbackCurrency, now: now, defaults: defaults)]
     }
 
+    /// Pre-pass + chunking off the main actor (long PDF text).
+    @concurrent private nonisolated static func scan(_ text: String, now: Date) async -> (Fields, [String]) {
+        (prepass(text, now: now), chunks(text))
+    }
+
     /// Line-boundary chunks of at most `limit` characters; a single longer line is hard-split. Pure.
-    static func chunks(_ text: String, limit: Int = 2_000) -> [String] {
+    nonisolated static func chunks(_ text: String, limit: Int = 2_000) -> [String] {
         var result: [String] = [], current = ""
         for var line in text.split(whereSeparator: \.isNewline) {
             while line.count > limit {
@@ -170,6 +177,8 @@ extension TransactionExtraction {
                   !["", "nil", "null", "none", "n/a", "unknown"].contains(value.lowercased()) else { return nil }
             return value
         }
+        // ponytail: money scan of the full text stays on main; PDF import caps text at 5 pages so it stays small.
+        // Move tokens into `scan` if long text gets slow.
         let tokens = text.components(separatedBy: .newlines).flatMap(money)
         let amounts = Set(tokens.map(\.amount))
         let total = prepass.total ?? model.compactMap { clean($0.total).flatMap { ApplePay.parseAmount($0, fallback: "")?.amount } }

@@ -51,9 +51,9 @@ enum ReceiptScan {
         return pages.joined(separator: "\n\n")
     }
 
-    /// OCR then TransactionExtraction.extract; blank text gives one empty draft so review still opens.
-    static func drafts(from images: [Data], categories: [Category]) async -> [DraftTransaction] {
-        let drafts = await TransactionExtraction.extract(await text(in: images), categories: categories)
+    /// TransactionExtraction.extract shared by scan and PDF import; blank text gives one empty draft so review still opens.
+    static func drafts(text: String, categories: [Category]) async -> [DraftTransaction] {
+        let drafts = await TransactionExtraction.extract(text, categories: categories)
         return drafts.isEmpty ? [DraftTransaction(amount: 0, currency: FX.home(), date: .now)] : drafts
     }
 }
