@@ -1,7 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// CSV export of transactions (#42). RFC 4180 quoting, CRLF records, UTF-8 BOM so Excel reads non-ASCII.
+/// CSV export of transactions (#42) and holdings (#48). RFC 4180 quoting, CRLF records, UTF-8 BOM so Excel reads non-ASCII.
 enum CSVExport {
     static let header = ["date", "account", "merchant", "category", "amount", "currency",
                          "account_amount", "home_amount", "home_currency", "notes", "source"]
@@ -26,8 +26,26 @@ enum CSVExport {
         }
     }
 
-    static func filename(now: Date = .now, timeZone: TimeZone = .current) -> String {
-        "mise-transactions-\(now.formatted(Date.ISO8601FormatStyle(timeZone: timeZone).year().month().day())).csv"
+    static let holdingsHeader = ["account", "kind", "symbol", "name", "quantity", "cost_basis", "currency", "price",
+                                 "price_date", "value", "gain_loss", "home_value", "home_currency"]
+
+    /// Header, then one row per holding. Value fields are empty without a price; home_value is empty without today's FX rate.
+    static func holdingRows(_ holdings: [Holding], rates: FXRates, homeCurrency: String, today: Date = .now,
+                            timeZone: TimeZone = .current) -> [[String]] {
+        let day = Date.ISO8601FormatStyle(timeZone: timeZone).year().month().day()
+        let dayRates = rates.rates(on: FXRates.day(today)) ?? [:]
+        return [holdingsHeader] + holdings.map { h in
+            let value = Holdings.value(h)
+            return [h.account?.name ?? "", h.kind.rawValue, h.symbol, h.name, "\(h.quantity)", "\(h.costBasis)", h.currency,
+                    h.price.map { "\($0)" } ?? "", h.priceDate?.formatted(day) ?? "", value.map { "\($0)" } ?? "",
+                    Holdings.gain(h).map { "\($0)" } ?? "",
+                    value.flatMap { FX.convert($0, from: h.currency, to: homeCurrency, rates: dayRates) }.map { "\($0)" } ?? "",
+                    homeCurrency]
+        }
+    }
+
+    static func filename(_ kind: String = "transactions", now: Date = .now, timeZone: TimeZone = .current) -> String {
+        "mise-\(kind)-\(now.formatted(Date.ISO8601FormatStyle(timeZone: timeZone).year().month().day())).csv"
     }
 }
 
