@@ -22,6 +22,7 @@ struct FinanceView: View {
     @State private var readingReceipt = false
     @State private var receipt: (drafts: [DraftTransaction], source: ReviewSource)?
     @State private var csv: ReviewSource?
+    @State private var showingCSV = false
     /// Mapped CSV drafts held until the mapping sheet has dismissed, then shown in review.
     @State private var pendingCSV: (drafts: [DraftTransaction], source: ReviewSource)?
     @Bindable private var billPrompt = BillPrompt.shared
@@ -82,7 +83,7 @@ struct FinanceView: View {
                         .disabled(readingReceipt)
                         Button("Import PDF", systemImage: "doc.richtext") { importing = .pdf }
                             .disabled(readingReceipt)
-                        Button("Import CSV", systemImage: "tablecells") { importing = .commaSeparatedText }
+                        Button("Import CSV", systemImage: "tablecells") { importing = .delimitedText }
                             .disabled(readingReceipt)
                     }
                     .disabled(!accounts.contains { !$0.archived })
@@ -133,8 +134,9 @@ struct FinanceView: View {
             guard let data = try? Data(contentsOf: url) else { return }
             let source = ReviewSource(data: data, filename: url.lastPathComponent)
             let type = UTType(filenameExtension: url.pathExtension)
-            if type?.conforms(to: .delimitedText) == true || type?.conforms(to: .plainText) == true {
+            if type?.conforms(to: .delimitedText) == true {
                 csv = source
+                showingCSV = true
             } else if type?.conforms(to: .pdf) == true {
                 read(source) { await PDFImport.text(in: data) }
             } else {
@@ -142,7 +144,8 @@ struct FinanceView: View {
             }
         }
         // Review only after the mapping sheet is gone: two sheets in sequence on one view otherwise race.
-        .sheet(isPresented: Binding { csv != nil } set: { if !$0 { csv = nil } }, onDismiss: {
+        .sheet(isPresented: $showingCSV, onDismiss: {
+            csv = nil
             if let pendingCSV {
                 receipt = pendingCSV
                 self.pendingCSV = nil
@@ -151,7 +154,7 @@ struct FinanceView: View {
             if let source = csv {
                 CSVImportView(source: source) { drafts in
                     pendingCSV = (drafts, source)
-                    csv = nil
+                    showingCSV = false
                 }
             }
         }
@@ -184,7 +187,7 @@ struct FinanceView: View {
                     if let source = TransactionReview.sampleSource() { read(source) { await ReceiptScan.text(in: [source.data]) } }
                 case "pdf":
                     if let source = TransactionReview.samplePDF() { read(source) { await PDFImport.text(in: source.data) } }
-                case "csv": csv = CSVImport.sampleCSVSource()
+                case "csv": csv = CSVImport.sampleCSVSource(); showingCSV = true
                 case "csvreview":
                     let source = CSVImport.sampleCSVSource()
                     let rows = CSVImport.rows(source.data)

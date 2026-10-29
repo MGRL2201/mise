@@ -25,12 +25,13 @@ struct CSVImportView: View {
     private var dataRows: ArraySlice<[String]> { rows.dropFirst(mapping.hasHeader ? 1 : 0) }
 
     var body: some View {
-        NavigationStack {
+        let result = account.map { CSVImport.drafts(rows, mapping: mapping, account: $0) }
+        return NavigationStack {
             Group {
                 if rows.isEmpty {
                     ContentUnavailableView("No rows found", systemImage: "tablecells")
                 } else {
-                    form
+                    form(result)
                 }
             }
             .navigationTitle("Import CSV")
@@ -39,24 +40,23 @@ struct CSVImportView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Continue") {
-                        guard let account else { return }
+                        guard let account, let result else { return }
                         if !Storage.inMemory { mapping.save(for: account.id) }
-                        onContinue(CSVImport.drafts(rows, mapping: mapping, account: account).drafts)
+                        onContinue(result.drafts)
                     }
-                    .disabled(account.map { CSVImport.drafts(rows, mapping: mapping, account: $0).drafts.isEmpty } ?? true)
+                    .disabled(result?.drafts.isEmpty ?? true)
                 }
             }
         }
         .onAppear { if account == nil { account = accounts.first } }
-        .onChange(of: account, initial: true) {
+        .onChange(of: account) {
             if let account { mapping = CSVMapping.saved(for: account.id) ?? CSVImport.guess(header: rows.first ?? []) }
         }
     }
 
-    private var form: some View {
-        // ponytail: every render re-parses all rows (Continue + footer); fine for a few thousand, cache if large statements lag.
-        let result = account.map { CSVImport.drafts(rows, mapping: mapping, account: $0) }
-        return Form {
+    private func form(_ result: (drafts: [DraftTransaction], skipped: Int)?) -> some View {
+        // ponytail: every render re-parses all rows once; fine for a few thousand, cache if large statements lag.
+        Form {
             Section("Account") {
                 Picker("Account", selection: $account) {
                     ForEach(accounts, id: \.self) { Text($0.name).tag(Optional($0)) }
