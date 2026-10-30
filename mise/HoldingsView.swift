@@ -43,6 +43,12 @@ struct HoldingEditor: View {
         _priceDate = State(initialValue: holding?.priceDate ?? .now)
         _currency = State(initialValue: holding?.currency ?? account.currency)
         _coinID = State(initialValue: holding?.coinID)
+        #if DEBUG
+        if holding == nil && UserDefaults.standard.string(forKey: "miseMoney") == "coins" {
+            _kind = State(initialValue: .crypto)
+            _query = State(initialValue: "eth")
+        }
+        #endif
     }
 
     /// nil once deleted: the sheet still renders during dismissal and must not read a dead model.

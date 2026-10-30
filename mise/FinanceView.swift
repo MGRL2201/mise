@@ -166,7 +166,7 @@ struct FinanceView: View {
         .onAppear {
             if accounts.isEmpty && !confirmed { askHome = true }
             #if DEBUG
-            // Screenshot hook: `-miseMoney transaction|transfer|all|budgets|bills|goals|reports|summary|uncategorized|review|extract|scan|pdf|csv|csvreview|holdings|applepay`, once per launch.
+            // Screenshot hook: `-miseMoney transaction|transfer|all|budgets|bills|goals|reports|summary|uncategorized|review|extract|scan|pdf|csv|csvreview|holdings|coins|applepay`, once per launch.
             if !debugOpened {
                 debugOpened = true
                 switch UserDefaults.standard.string(forKey: "miseMoney") {
@@ -197,7 +197,7 @@ struct FinanceView: View {
                         .min(by: { $0.name.localizedStandardCompare($1.name) == .orderedAscending }) {
                         receipt = (CSVImport.drafts(rows, mapping: CSVImport.guess(header: rows.first ?? []), account: account).drafts, source)
                     }
-                case "holdings":
+                case "holdings", "coins":
                     showingHoldings = accounts.filter { !$0.archived && $0.type == .brokerage }
                         .min { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
                 #if os(iOS)
@@ -462,6 +462,9 @@ struct AccountDetailView: View {
     @State private var exportDocument: CSVDocument?
     @State private var exportError: String?
     @State private var refreshing = false
+    #if DEBUG
+    @State private var debugOpened = false
+    #endif
     @AppStorage(FX.homeKey) private var home = FX.home()
 
     init(account: Account, rates: FXRates) {
@@ -518,6 +521,15 @@ struct AccountDetailView: View {
         .sheet(item: $editingTransaction, onDismiss: reloadRates) { TransactionEditor(transaction: $0) }
         .sheet(item: $editingTransfer, onDismiss: reloadRates) { TransferEditor(transfer: $0) }
         .sheet(isPresented: $newHolding, onDismiss: reloadRates) { HoldingEditor(holding: nil, account: account) }
+        #if DEBUG
+        .onAppear {
+            // Screenshot hook: `-miseMoney coins` opens the coin search pre-filled, once per launch.
+            if !debugOpened && UserDefaults.standard.string(forKey: "miseMoney") == "coins" {
+                debugOpened = true
+                newHolding = true
+            }
+        }
+        #endif
         .sheet(item: $editingHolding, onDismiss: reloadRates) { HoldingEditor(holding: $0, account: account) }
         .sheet(item: $pricingHolding, onDismiss: reloadRates) { PriceEditor(holding: $0) }
         .fileExporter(
