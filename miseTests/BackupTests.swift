@@ -208,6 +208,7 @@ extension BackupTests {
         holding.createdAt = Date(timeIntervalSince1970: 6000)
         let unpriced = Holding(symbol: "BTC", name: "Bitcoin", kind: .crypto, quantity: Decimal(string: "0.25")!,
                                costBasis: 9000, currency: "USD")
+        unpriced.coinID = "bitcoin"
         source.context.insert(holding)
         source.context.insert(unpriced)
         holding.account = account
@@ -259,6 +260,7 @@ extension BackupTests {
         let unpricedCopy = try #require(holdings.first { $0.id == unpriced.id })
         #expect(unpricedCopy.kind == .crypto && unpricedCopy.quantity == Decimal(string: "0.25") && unpricedCopy.costBasis == 9000)
         #expect(unpricedCopy.price == nil && unpricedCopy.priceDate == nil && unpricedCopy.account == nil)
+        #expect(unpricedCopy.coinID == "bitcoin" && holdingCopy.coinID == nil)
     }
 
     @Test func billsRoundTripAndReplaceStale() throws {

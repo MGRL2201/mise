@@ -166,7 +166,7 @@ struct FinanceView: View {
         .onAppear {
             if accounts.isEmpty && !confirmed { askHome = true }
             #if DEBUG
-            // Screenshot hook: `-miseMoney transaction|transfer|all|budgets|bills|goals|reports|summary|uncategorized|review|extract|scan|pdf|csv|csvreview|holdings|applepay`, once per launch.
+            // Screenshot hook: `-miseMoney transaction|transfer|all|budgets|bills|goals|reports|summary|uncategorized|review|extract|scan|pdf|csv|csvreview|holdings|coins|applepay`, once per launch.
             if !debugOpened {
                 debugOpened = true
                 switch UserDefaults.standard.string(forKey: "miseMoney") {
@@ -197,7 +197,7 @@ struct FinanceView: View {
                         .min(by: { $0.name.localizedStandardCompare($1.name) == .orderedAscending }) {
                         receipt = (CSVImport.drafts(rows, mapping: CSVImport.guess(header: rows.first ?? []), account: account).drafts, source)
                     }
-                case "holdings":
+                case "holdings", "coins":
                     showingHoldings = accounts.filter { !$0.archived && $0.type == .brokerage }
                         .min { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
                 #if os(iOS)
@@ -461,6 +461,10 @@ struct AccountDetailView: View {
     @State private var pricingHolding: Holding?
     @State private var exportDocument: CSVDocument?
     @State private var exportError: String?
+    @State private var refreshing = false
+    #if DEBUG
+    @State private var debugOpened = false
+    #endif
     @AppStorage(FX.homeKey) private var home = FX.home()
 
     init(account: Account, rates: FXRates) {
@@ -470,10 +474,17 @@ struct AccountDetailView: View {
 
     /// Editors start FX.refresh on save without awaiting it; await one here, then pick up the rates.
     private func reloadRates() {
-        Task {
-            await FX.refresh(context: modelContext)
-            rates = .load()
-        }
+        Task { await refreshPrices() }
+    }
+
+    /// Crypto prices first (a newly linked coin), then FX, which records the snapshot.
+    private func refreshPrices() async {
+        guard !refreshing else { return }
+        refreshing = true
+        await CoinGecko.refresh(context: modelContext)
+        await FX.refresh(context: modelContext)
+        rates = .load()
+        refreshing = false
     }
 
     var body: some View {
@@ -510,6 +521,15 @@ struct AccountDetailView: View {
         .sheet(item: $editingTransaction, onDismiss: reloadRates) { TransactionEditor(transaction: $0) }
         .sheet(item: $editingTransfer, onDismiss: reloadRates) { TransferEditor(transfer: $0) }
         .sheet(isPresented: $newHolding, onDismiss: reloadRates) { HoldingEditor(holding: nil, account: account) }
+        #if DEBUG
+        .onAppear {
+            // Screenshot hook: `-miseMoney coins` opens the coin search pre-filled, once per launch.
+            if !debugOpened && UserDefaults.standard.string(forKey: "miseMoney") == "coins" {
+                debugOpened = true
+                newHolding = true
+            }
+        }
+        #endif
         .sheet(item: $editingHolding, onDismiss: reloadRates) { HoldingEditor(holding: $0, account: account) }
         .sheet(item: $pricingHolding, onDismiss: reloadRates) { PriceEditor(holding: $0) }
         .fileExporter(
@@ -542,12 +562,16 @@ struct AccountDetailView: View {
             .listRowBackground(Color(theme.surface))
             if showsHoldings {
                 Section("Holdings") {
+                    let linked = holdings.filter { $0.coinID != nil }
                     if holdings.isEmpty {
                         Text("No holdings yet").foregroundStyle(.secondary)
                     } else {
                         LabeledContent("Value", value: summary.value, format: .currency(code: home))
                         LabeledContent("Gain/Loss") {
                             Text(summary.gain, format: .currency(code: home)).foregroundStyle(summary.gain < 0 ? .red : .green)
+                        }
+                        if let updated = linked.compactMap(\.priceDate).max() {
+                            Text("Prices updated \(updated, format: .relative(presentation: .named))").foregroundStyle(.secondary)
                         }
                         if summary.unpriced > 0 {
                             Text("\(summary.unpriced) without price (not in totals)").foregroundStyle(.secondary)
@@ -556,6 +580,10 @@ struct AccountDetailView: View {
                             Text("\(amount.formatted(.currency(code: code))) (no rate)").foregroundStyle(.secondary)
                         }
                         ForEach(holdings) { HoldingRow(holding: $0, editing: $editingHolding, pricing: $pricingHolding) }
+                    }
+                    if !linked.isEmpty {
+                        Button("Refresh Prices") { Task { await refreshPrices() } }
+                            .disabled(refreshing)
                     }
                     Button("Add Holding") { newHolding = true }
                     Button("Export All Holdings (CSV)", action: exportHoldings)
@@ -580,6 +608,7 @@ struct AccountDetailView: View {
                 .listRowBackground(Color(theme.surface))
             }
         }
+        .refreshable { await refreshPrices() }
         .navigationTitle(account.name)
     }
 

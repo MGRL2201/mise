@@ -26,6 +26,10 @@ struct HoldingEditor: View {
     @State private var priceDate: Date
     @State private var currency: String
     @State private var confirmingDelete = false
+    @State private var coinID: String?
+    @State private var query = ""
+    @State private var results: [Coin] = []
+    @State private var searchError: String?
 
     init(holding: Holding?, account: Account) {
         self.holding = holding
@@ -38,6 +42,13 @@ struct HoldingEditor: View {
         _price = State(initialValue: holding?.price.map(Accounts.plain) ?? "")
         _priceDate = State(initialValue: holding?.priceDate ?? .now)
         _currency = State(initialValue: holding?.currency ?? account.currency)
+        _coinID = State(initialValue: holding?.coinID)
+        #if DEBUG
+        if holding == nil && UserDefaults.standard.string(forKey: "miseMoney") == "coins" {
+            _kind = State(initialValue: .crypto)
+            _query = State(initialValue: "eth")
+        }
+        #endif
     }
 
     /// nil once deleted: the sheet still renders during dismissal and must not read a dead model.
@@ -79,11 +90,56 @@ struct HoldingEditor: View {
                         #endif
                         .onChange(of: price) { priceDate = .now }
                     if hasPrice {
-                        DatePicker("Price date", selection: $priceDate, displayedComponents: .date)
+                        DatePicker("Price date", selection: $priceDate, in: ...Date.now, displayedComponents: .date)
                     }
                     CurrencyPicker(title: "Currency", selection: $currency)
                 } footer: {
                     if kind == .fund { Text("Valued as a whole? Use quantity 1 and enter the total value as the price.") }
+                }
+                if kind == .crypto {
+                    Section {
+                        if let coinID {
+                            LabeledContent("Linked coin", value: coinID)
+                            Button("Unlink") { self.coinID = nil }
+                        }
+                        TextField("Search coins", text: $query)
+                            #if os(iOS)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            #endif
+                            .task(id: query) {
+                                try? await Task.sleep(for: .milliseconds(400))
+                                guard !Task.isCancelled else { return }
+                                let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+                                guard !trimmed.isEmpty else { results = []; searchError = nil; return }
+                                do {
+                                    let found = try await CoinGecko.search(trimmed)
+                                    guard !Task.isCancelled else { return }
+                                    results = found
+                                    searchError = nil
+                                } catch {
+                                    guard !Task.isCancelled else { return }
+                                    results = []
+                                    searchError = "Search unavailable"
+                                }
+                            }
+                        if let searchError { Text(searchError).foregroundStyle(.secondary) }
+                        ForEach(results) { coin in
+                            Button {
+                                coinID = coin.id
+                                symbol = coin.symbol.uppercased()
+                                name = coin.name
+                                query = ""
+                                results = []
+                            } label: {
+                                LabeledContent(coin.name, value: coin.symbol.uppercased())
+                            }
+                        }
+                    } header: {
+                        Text("CoinGecko")
+                    } footer: {
+                        Text("Linked coins get their price from CoinGecko on refresh, overwriting manual prices.")
+                    }
                 }
                 if let holding = live {
                     Section {
@@ -124,6 +180,7 @@ struct HoldingEditor: View {
         saved.currency = currency
         saved.price = hasPrice ? nonNegativeAmount(price) : nil
         saved.priceDate = hasPrice ? priceDate : nil
+        saved.coinID = kind == .crypto ? coinID : nil
         try? modelContext.save()
         dismiss()
     }
@@ -154,7 +211,7 @@ struct PriceEditor: View {
                         #if os(iOS)
                         .keyboardType(.numbersAndPunctuation)
                         #endif
-                    DatePicker("Date", selection: $date, displayedComponents: .date)
+                    DatePicker("Date", selection: $date, in: ...Date.now, displayedComponents: .date)
                 } footer: {
                     Text("Per unit, in \(holding.currency).")
                 }
