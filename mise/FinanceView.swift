@@ -1,6 +1,9 @@
 import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
+#if os(iOS)
+import VisionKit
+#endif
 
 /// Money tab home: net worth, accounts by type, archived accounts (#35).
 struct FinanceView: View {
@@ -14,6 +17,14 @@ struct FinanceView: View {
     @State private var newTransaction = false
     @State private var newTransfer = false
     @State private var askHome = false
+    @State private var scanning = false
+    @State private var importing: UTType?
+    @State private var readingReceipt = false
+    @State private var receipt: (drafts: [DraftTransaction], source: ReviewSource)?
+    @State private var csv: ReviewSource?
+    @State private var showingCSV = false
+    /// Mapped CSV drafts held until the mapping sheet has dismissed, then shown in review.
+    @State private var pendingCSV: (drafts: [DraftTransaction], source: ReviewSource)?
     @Bindable private var billPrompt = BillPrompt.shared
     @Bindable private var summaryPrompt = MonthSummaryPrompt.shared
     #if DEBUG
@@ -25,6 +36,9 @@ struct FinanceView: View {
     @State private var showingReports = false
     @State private var showingSummary = false
     @State private var showingUncategorized = false
+    @State private var showingReview = false
+    @State private var showingHoldings: Account?
+    @State private var extracted: [DraftTransaction]?
     #if os(iOS)
     @State private var showingApplePay = false
     #endif
@@ -46,6 +60,13 @@ struct FinanceView: View {
                 list
             }
         }
+        .overlay {
+            if readingReceipt {
+                ProgressView("Reading…")
+                    .padding()
+                    .background(.regularMaterial, in: .rect(cornerRadius: 12))
+            }
+        }
         .navigationTitle("Money")
         .themedBackground()
         .toolbar {
@@ -54,6 +75,17 @@ struct FinanceView: View {
                     Group {
                         Button("New Transaction", systemImage: "list.bullet.rectangle") { newTransaction = true }
                         Button("New Transfer", systemImage: "arrow.left.arrow.right") { newTransfer = true }
+                        Button("Scan Receipt", systemImage: "doc.text.viewfinder") {
+                            #if os(iOS)
+                            if VNDocumentCameraViewController.isSupported { scanning = true; return }
+                            #endif
+                            importing = .image
+                        }
+                        .disabled(readingReceipt)
+                        Button("Import PDF", systemImage: "doc.richtext") { importing = .pdf }
+                            .disabled(readingReceipt)
+                        Button("Import CSV", systemImage: "tablecells") { importing = .delimitedText }
+                            .disabled(readingReceipt)
                     }
                     .disabled(!accounts.contains { !$0.archived })
                     Button("New Account", systemImage: "banknote") { isAdding = true }
@@ -68,6 +100,13 @@ struct FinanceView: View {
         .navigationDestination(isPresented: $showingReports) { ReportsView() }
         .navigationDestination(isPresented: $showingSummary) { MonthSummaryView(month: .now) }
         .navigationDestination(isPresented: $showingUncategorized) { UncategorizedView() }
+        .navigationDestination(item: $showingHoldings) { AccountDetailView(account: $0, rates: .load()) }
+        .sheet(isPresented: $showingReview) {
+            TransactionReviewView(drafts: TransactionReview.sampleDrafts(accounts: accounts), source: TransactionReview.sampleSource())
+        }
+        .sheet(isPresented: Binding { extracted != nil } set: { if !$0 { extracted = nil } }) {
+            TransactionReviewView(drafts: extracted ?? [], source: nil)
+        }
         #if os(iOS)
         .navigationDestination(isPresented: $showingApplePay) { ApplePaySettingsView() }
         #endif
@@ -80,10 +119,54 @@ struct FinanceView: View {
         .sheet(isPresented: $newTransaction) { TransactionEditor(transaction: nil) }
         .sheet(isPresented: $newTransfer) { TransferEditor(transfer: nil) }
         .sheet(isPresented: $askHome, onDismiss: { confirmed = true }) { HomeCurrencySheet() }
+        #if os(iOS)
+        .fullScreenCover(isPresented: $scanning) {
+            DocumentScanner { pages in
+                scanning = false
+                // ponytail: multi-page scans attach only the first page; combine into a PDF if needed.
+                if let first = pages.first { read(ReviewSource(data: first, filename: "receipt.jpg")) { await ReceiptScan.text(in: pages) } }
+            }
+            .ignoresSafeArea()
+        }
+        #endif
+        .fileImporter(isPresented: Binding { importing != nil } set: { if !$0 { importing = nil } }, allowedContentTypes: importing.map { [$0] } ?? [.image]) { result in
+            guard let url = try? result.get() else { return }
+            let accessing = url.startAccessingSecurityScopedResource()
+            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+            guard let data = try? Data(contentsOf: url) else { return }
+            let source = ReviewSource(data: data, filename: url.lastPathComponent)
+            let type = UTType(filenameExtension: url.pathExtension)
+            if type?.conforms(to: .delimitedText) == true {
+                csv = source
+                showingCSV = true
+            } else if type?.conforms(to: .pdf) == true {
+                read(source) { await PDFImport.text(in: data) }
+            } else {
+                read(source) { await ReceiptScan.text(in: [data]) }
+            }
+        }
+        // Review only after the mapping sheet is gone: two sheets in sequence on one view otherwise race.
+        .sheet(isPresented: $showingCSV, onDismiss: {
+            csv = nil
+            if let pendingCSV {
+                receipt = pendingCSV
+                self.pendingCSV = nil
+            }
+        }) {
+            if let source = csv {
+                CSVImportView(source: source) { drafts in
+                    pendingCSV = (drafts, source)
+                    showingCSV = false
+                }
+            }
+        }
+        .sheet(isPresented: Binding { receipt != nil } set: { if !$0 { receipt = nil } }) {
+            TransactionReviewView(drafts: receipt?.drafts ?? [], source: receipt?.source)
+        }
         .onAppear {
             if accounts.isEmpty && !confirmed { askHome = true }
             #if DEBUG
-            // Screenshot hook: `-miseMoney transaction|transfer|all|budgets|bills|goals|reports|summary|uncategorized|applepay`, once per launch.
+            // Screenshot hook: `-miseMoney transaction|transfer|all|budgets|bills|goals|reports|summary|uncategorized|review|extract|scan|pdf|csv|csvreview|holdings|coins|applepay`, once per launch.
             if !debugOpened {
                 debugOpened = true
                 switch UserDefaults.standard.string(forKey: "miseMoney") {
@@ -96,6 +179,27 @@ struct FinanceView: View {
                 case "reports": showingReports = true
                 case "summary": showingSummary = true
                 case "uncategorized": showingUncategorized = true
+                case "review": showingReview = true
+                case "extract":
+                    Task {
+                        let categories = (try? modelContext.fetch(FetchDescriptor<Category>())) ?? []
+                        extracted = await TransactionExtraction.extract(TransactionReview.sampleReceiptText, categories: categories)
+                    }
+                case "scan":
+                    if let source = TransactionReview.sampleSource() { read(source) { await ReceiptScan.text(in: [source.data]) } }
+                case "pdf":
+                    if let source = TransactionReview.samplePDF() { read(source) { await PDFImport.text(in: source.data) } }
+                case "csv": csv = CSVImport.sampleCSVSource(); showingCSV = true
+                case "csvreview":
+                    let source = CSVImport.sampleCSVSource()
+                    let rows = CSVImport.rows(source.data)
+                    if let account = accounts.filter({ !$0.archived })
+                        .min(by: { $0.name.localizedStandardCompare($1.name) == .orderedAscending }) {
+                        receipt = (CSVImport.drafts(rows, mapping: CSVImport.guess(header: rows.first ?? []), account: account).drafts, source)
+                    }
+                case "holdings", "coins":
+                    showingHoldings = accounts.filter { !$0.archived && $0.type == .brokerage }
+                        .min { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
                 #if os(iOS)
                 case "applepay": showingApplePay = true
                 #endif
@@ -119,7 +223,7 @@ struct FinanceView: View {
         let archived = accounts.filter(\.archived)
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         let worth = Accounts.netWorth(
-            accounts.map { (amount: Finance.balance(of: $0, rates: rates), currency: $0.currency) },
+            Holdings.worth(accounts, rates: rates),
             rates: rates, home: home
         )
         let interval = Calendar.current.dateInterval(of: .month, for: month)!
@@ -185,6 +289,17 @@ struct FinanceView: View {
             LabeledContent(account.name) {
                 Text(Finance.balance(of: account, rates: rates), format: .currency(code: account.currency))
             }
+        }
+    }
+
+    /// OCR/PDF text + extraction off the scan/import, then the review sheet (#45/#46).
+    private func read(_ source: ReviewSource, text: @escaping () async -> String) {
+        guard !readingReceipt else { return }
+        readingReceipt = true
+        Task {
+            let categories = (try? modelContext.fetch(FetchDescriptor<Category>())) ?? []
+            receipt = (await ReceiptScan.drafts(text: await text(), categories: categories), source)
+            readingReceipt = false
         }
     }
 }
@@ -264,6 +379,7 @@ struct AccountEditor: View {
             && (account.outgoingTransfers ?? []).isEmpty
             && (account.incomingTransfers ?? []).isEmpty
             && (account.bills ?? []).isEmpty
+            && (account.holdings ?? []).isEmpty
     }
 
     var body: some View {
@@ -297,7 +413,7 @@ struct AccountEditor: View {
                                 }
                         }
                     } footer: {
-                        if !canDelete { Text("Accounts with transactions or bills can be archived, not deleted.") }
+                        if !canDelete { Text("Accounts with transactions, bills or holdings can be archived, not deleted.") }
                     }
                 }
             }
@@ -340,6 +456,17 @@ struct AccountDetailView: View {
     @State private var payingCard = false
     @State private var editingTransaction: Transaction?
     @State private var editingTransfer: Transfer?
+    @State private var newHolding = false
+    @State private var editingHolding: Holding?
+    @State private var pricingHolding: Holding?
+    @State private var exportDocument: CSVDocument?
+    @State private var exportError: String?
+    @State private var refreshing = false
+    @State private var hasStockKey = true
+    #if DEBUG
+    @State private var debugOpened = false
+    #endif
+    @AppStorage(FX.homeKey) private var home = FX.home()
 
     init(account: Account, rates: FXRates) {
         self.account = account
@@ -348,10 +475,18 @@ struct AccountDetailView: View {
 
     /// Editors start FX.refresh on save without awaiting it; await one here, then pick up the rates.
     private func reloadRates() {
-        Task {
-            await FX.refresh(context: modelContext)
-            rates = .load()
-        }
+        Task { await refreshPrices() }
+    }
+
+    /// Crypto and stock prices first (a newly linked coin or ticker), then FX, which records the snapshot.
+    private func refreshPrices() async {
+        guard !refreshing else { return }
+        refreshing = true
+        await CoinGecko.refresh(context: modelContext)
+        await Stocks.refresh(context: modelContext)
+        await FX.refresh(context: modelContext)
+        rates = .load()
+        refreshing = false
     }
 
     var body: some View {
@@ -372,6 +507,9 @@ struct AccountDetailView: View {
                     if account.type == .credit {
                         Button("Pay Card", systemImage: "creditcard") { payingCard = true }
                     }
+                    if account.type == .brokerage {
+                        Button("New Holding", systemImage: "chart.line.uptrend.xyaxis") { newHolding = true }
+                    }
                 }
             }
             ToolbarItem(placement: .primaryAction) { Button("Edit") { editing = true } }
@@ -384,18 +522,81 @@ struct AccountDetailView: View {
         .sheet(isPresented: $payingCard, onDismiss: reloadRates) { TransferEditor(transfer: nil, to: account) }
         .sheet(item: $editingTransaction, onDismiss: reloadRates) { TransactionEditor(transaction: $0) }
         .sheet(item: $editingTransfer, onDismiss: reloadRates) { TransferEditor(transfer: $0) }
+        .sheet(isPresented: $newHolding, onDismiss: reloadRates) { HoldingEditor(holding: nil, account: account) }
+        #if DEBUG
+        .onAppear {
+            // Screenshot hook: `-miseMoney coins` opens the coin search pre-filled, once per launch.
+            if !debugOpened && UserDefaults.standard.string(forKey: "miseMoney") == "coins" {
+                debugOpened = true
+                newHolding = true
+            }
+        }
+        #endif
+        .sheet(item: $editingHolding, onDismiss: reloadRates) { HoldingEditor(holding: $0, account: account) }
+        .sheet(item: $pricingHolding, onDismiss: reloadRates) { PriceEditor(holding: $0) }
+        .fileExporter(
+            isPresented: Binding { exportDocument != nil } set: { if !$0 { exportDocument = nil } },
+            document: exportDocument, contentType: .commaSeparatedText, defaultFilename: CSVExport.filename("holdings")
+        ) { result in
+            if case .failure(let error) = result { exportError = error.localizedDescription }
+        }
+        .alert(
+            "Export failed",
+            isPresented: Binding { exportError != nil } set: { if !$0 { exportError = nil } }
+        ) {} message: {
+            Text(exportError ?? "")
+        }
     }
 
     private var form: some View {
         let days = Accounts.days(account.transactions ?? [])
         let transfers = ((account.outgoingTransfers ?? []) + (account.incomingTransfers ?? [])).sorted { $0.date > $1.date }
+        let holdings = (account.holdings ?? [])
+            .sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+        let showsHoldings = account.type == .brokerage || !holdings.isEmpty
+        let summary = Holdings.summary(holdings, rates: rates, home: home)
         return Form {
             Section {
-                LabeledContent("Balance") {
+                LabeledContent(showsHoldings ? "Cash" : "Balance") {
                     Text(Finance.balance(of: account, rates: rates), format: .currency(code: account.currency))
                 }
             }
             .listRowBackground(Color(theme.surface))
+            if showsHoldings {
+                Section("Holdings") {
+                    let linked = holdings.filter { $0.coinID != nil || Stocks.symbol(of: $0) != nil }
+                    if holdings.isEmpty {
+                        Text("No holdings yet").foregroundStyle(.secondary)
+                    } else {
+                        LabeledContent("Value", value: summary.value, format: .currency(code: home))
+                        LabeledContent("Gain/Loss") {
+                            Text(summary.gain, format: .currency(code: home)).foregroundStyle(summary.gain < 0 ? .red : .green)
+                        }
+                        if let updated = linked.compactMap(\.priceDate).max() {
+                            Text("Prices updated \(updated, format: .relative(presentation: .named))").foregroundStyle(.secondary)
+                        }
+                        if !hasStockKey && holdings.contains(where: { Stocks.symbol(of: $0) != nil }) {
+                            Text("Add an API key in Settings → Stock Prices to update stock prices automatically.")
+                                .foregroundStyle(.secondary)
+                        }
+                        if summary.unpriced > 0 {
+                            Text("\(summary.unpriced) without price (not in totals)").foregroundStyle(.secondary)
+                        }
+                        ForEach(summary.unconverted.filter { $0.value != 0 }.sorted { $0.key < $1.key }, id: \.key) { code, amount in
+                            Text("\(amount.formatted(.currency(code: code))) (no rate)").foregroundStyle(.secondary)
+                        }
+                        ForEach(holdings) { HoldingRow(holding: $0, editing: $editingHolding, pricing: $pricingHolding) }
+                    }
+                    if !linked.isEmpty {
+                        Button("Refresh Prices") { Task { await refreshPrices() } }
+                            .disabled(refreshing)
+                    }
+                    Button("Add Holding") { newHolding = true }
+                    Button("Export All Holdings (CSV)", action: exportHoldings)
+                        .disabled(((try? modelContext.fetchCount(FetchDescriptor<Holding>())) ?? 0) == 0)
+                }
+                .listRowBackground(Color(theme.surface))
+            }
             if days.isEmpty {
                 Section { Text("No transactions yet").foregroundStyle(.secondary) }
                     .listRowBackground(Color(theme.surface))
@@ -413,7 +614,23 @@ struct AccountDetailView: View {
                 .listRowBackground(Color(theme.surface))
             }
         }
+        .refreshable { await refreshPrices() }
+        .onAppear { hasStockKey = Keychain.get(Keychain.stockAPIKey) != nil }
         .navigationTitle(account.name)
+    }
+
+    /// Every holding in the store, by account then symbol. Rows read models on main; encoding runs off.
+    private func exportHoldings() {
+        let all = ((try? modelContext.fetch(FetchDescriptor<Holding>())) ?? []).sorted {
+            let byAccount = ($0.account?.name ?? "").localizedStandardCompare($1.account?.name ?? "")
+            return byAccount == .orderedSame
+                ? $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+                : byAccount == .orderedAscending
+        }
+        let rows = CSVExport.holdingRows(all, rates: rates, homeCurrency: home)
+        Task {
+            exportDocument = CSVDocument(data: await Task.detached { CSVExport.encode(rows) }.value)
+        }
     }
 
     private func transferRow(_ transfer: Transfer) -> some View {

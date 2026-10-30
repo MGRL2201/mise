@@ -18,6 +18,7 @@ enum Storage {
         Bill.self,
         Goal.self,
         NetWorthSnapshot.self,
+        Holding.self,
     ]
 
     /// DEBUG `-miseSeedFinance YES`: in-memory seeded store; shared side effects (backup, AlarmKit) must skip.
@@ -61,10 +62,10 @@ struct AttachmentFileStore {
         if let baseDirectory {
             self.baseDirectory = baseDirectory
         } else {
-            let appSupport = FileManager.default.urls(
-                for: .applicationSupportDirectory, in: .userDomainMask
-            )[0]
-            self.baseDirectory = appSupport.appendingPathComponent("Attachments")
+            // Seeded sample data (Storage.inMemory) must never write real attachment files.
+            let root = Storage.inMemory ? FileManager.default.temporaryDirectory
+                : FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            self.baseDirectory = root.appendingPathComponent("Attachments")
         }
     }
 

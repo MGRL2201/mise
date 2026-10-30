@@ -201,10 +201,22 @@ extension BackupTests {
                               GoalContribution(amount: Decimal(string: "-20.25")!, date: Date(timeIntervalSince1970: 200))]
         source.context.insert(goal)
         goal.account = debit
+        let holding = Holding(symbol: "VWRA", name: "Vanguard All-World", kind: .fund,
+                              quantity: Decimal(string: "12.5")!, costBasis: Decimal(string: "1500.10")!, currency: "USD")
+        holding.price = Decimal(string: "130.42")!
+        holding.priceDate = Date(timeIntervalSince1970: 5000)
+        holding.createdAt = Date(timeIntervalSince1970: 6000)
+        let unpriced = Holding(symbol: "BTC", name: "Bitcoin", kind: .crypto, quantity: Decimal(string: "0.25")!,
+                               costBasis: 9000, currency: "USD")
+        unpriced.coinID = "bitcoin"
+        source.context.insert(holding)
+        source.context.insert(unpriced)
+        holding.account = account
         try source.context.save()
 
         let target = try freshStore()
         target.context.insert(Goal(name: "Stale", target: 1, currency: "USD"))
+        target.context.insert(Holding(symbol: "OLD", name: "Stale", kind: .stock, quantity: 1, costBasis: 1, currency: "USD"))
         target.context.insert(Account(name: "Stale", type: .cash, currency: "USD"))
         target.context.insert(mise.Category(name: "Stale", icon: "tag", color: 0))
         try target.context.save()
@@ -238,6 +250,17 @@ extension BackupTests {
         #expect(goalCopy.id == goal.id && goalCopy.name == "Trip" && goalCopy.target == Decimal(string: "1200.50"))
         #expect(goalCopy.currency == "SGD" && goalCopy.targetDate == goal.targetDate && goalCopy.createdAt == goal.createdAt)
         #expect(goalCopy.contributions == goal.contributions && goalCopy.account?.id == debit.id)
+        let holdings = try target.context.fetch(FetchDescriptor<Holding>())
+        #expect(Set(holdings.map(\.symbol)) == ["VWRA", "BTC"])
+        let holdingCopy = try #require(holdings.first { $0.id == holding.id })
+        #expect(holdingCopy.kind == .fund && holdingCopy.name == "Vanguard All-World" && holdingCopy.currency == "USD")
+        #expect(holdingCopy.quantity == Decimal(string: "12.5") && holdingCopy.costBasis == Decimal(string: "1500.10"))
+        #expect(holdingCopy.price == Decimal(string: "130.42") && holdingCopy.priceDate == holding.priceDate)
+        #expect(holdingCopy.createdAt == holding.createdAt && holdingCopy.account === card)
+        let unpricedCopy = try #require(holdings.first { $0.id == unpriced.id })
+        #expect(unpricedCopy.kind == .crypto && unpricedCopy.quantity == Decimal(string: "0.25") && unpricedCopy.costBasis == 9000)
+        #expect(unpricedCopy.price == nil && unpricedCopy.priceDate == nil && unpricedCopy.account == nil)
+        #expect(unpricedCopy.coinID == "bitcoin" && holdingCopy.coinID == nil)
     }
 
     @Test func billsRoundTripAndReplaceStale() throws {
@@ -302,5 +325,15 @@ extension BackupTests {
         #expect(snapshots.count == 1)
         #expect(copy.id == snapshot.id && copy.date == snapshot.date)
         #expect(copy.total == Decimal(string: "1234.56") && copy.currency == "SGD")
+    }
+
+    @Test func stockProviderRoundTrips() throws {
+        let source = try freshStore()
+        source.defaults.set(StockProvider.alphaVantage.rawValue, forKey: StockProvider.key)
+
+        let target = try freshStore()
+        try restore(try export(source), into: target)
+
+        #expect(StockProvider.current(target.defaults) == .alphaVantage)
     }
 }

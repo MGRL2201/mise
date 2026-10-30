@@ -27,6 +27,7 @@ final class Account {
     @Relationship(deleteRule: .nullify, inverse: \Transfer.to) var incomingTransfers: [Transfer]? = []
     @Relationship(deleteRule: .nullify, inverse: \Bill.account) var bills: [Bill]? = []
     @Relationship(deleteRule: .nullify, inverse: \Goal.account) var goals: [Goal]? = []
+    @Relationship(deleteRule: .nullify, inverse: \Holding.account) var holdings: [Holding]? = []
 
     init(name: String, type: AccountType, currency: String, openingBalance: Decimal = 0) {
         self.name = name

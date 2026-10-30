@@ -29,6 +29,7 @@ struct TransactionEditor: View {
     @State private var newCategory = ""
     @State private var notes: String
     @State private var confirmingDelete = false
+    @State private var source: ReviewSource?  // attached file, loaded once on appear
 
     init(transaction: Transaction?, account: Account? = nil) {
         self.transaction = transaction
@@ -120,13 +121,24 @@ struct TransactionEditor: View {
                 Section {
                     TextField("Notes", text: $notes, axis: .vertical)
                 }
+                if live?.attachmentID != nil {
+                    Section("Source") {
+                        if let source {
+                            AttachmentPreview(data: source.data, filename: source.filename)
+                        } else {
+                            Text("Source file missing").foregroundStyle(.secondary)
+                        }
+                    }
+                }
                 if let transaction = live {
                     Section {
                         Button("Delete Transaction", role: .destructive) { confirmingDelete = true }
                             .confirmationDialog("Delete this transaction?", isPresented: $confirmingDelete) {
                                 Button("Delete", role: .destructive) {
+                                    let attachmentID = transaction.attachmentID
                                     modelContext.delete(transaction)
                                     try? modelContext.save()
+                                    TransactionReview.deleteAttachmentIfUnused(attachmentID, context: modelContext)
                                     dismiss()
                                 }
                             }
@@ -145,6 +157,11 @@ struct TransactionEditor: View {
             .task(id: "\(income)|\(merchant)") { await prefillCategory() }
             .onAppear {
                 if account == nil && transaction == nil { account = choices(accounts, keeping: []).first }
+                if let id = transaction?.attachmentID,
+                   let attachment = try? modelContext.fetch(FetchDescriptor<Attachment>(predicate: #Predicate { $0.id == id })).first,
+                   let data = AttachmentFileStore().read(for: id) {
+                    source = ReviewSource(data: data, filename: attachment.filename)
+                }
             }
             .onChange(of: income) {
                 if let category, category.isIncome != income { self.category = nil; categoryIsAuto = false }

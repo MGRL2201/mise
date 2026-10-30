@@ -9,14 +9,14 @@ enum ApplePay {
 
     // ponytail: fixed symbol list; extend when real automation values show others.
     // Order matters: "US$" before "S$", "CA$" before "A$". Bare "$"/"¥" resolve via fallback.
-    private static let symbols = [("US$", "USD"), ("S$", "SGD"), ("HK$", "HKD"), ("NZ$", "NZD"), ("CA$", "CAD"),
+    nonisolated static let symbols = [("US$", "USD"), ("S$", "SGD"), ("HK$", "HKD"), ("NZ$", "NZD"), ("CA$", "CAD"),
                                   ("A$", "AUD"), ("JP¥", "JPY"), ("CN¥", "CNY"), ("€", "EUR"), ("£", "GBP"),
                                   ("₹", "INR"), ("RM", "MYR")]
-    private static let dollarCurrencies: Set = ["USD", "SGD", "AUD", "CAD", "NZD", "HKD"]
+    nonisolated private static let dollarCurrencies: Set = ["USD", "SGD", "AUD", "CAD", "NZD", "HKD"]
 
     /// Positive magnitude + ISO code from a raw Shortcuts amount ("S$12.50", "12,50 €", "SGD 7.00").
     /// nil for blank, no digits, leftover junk, or zero.
-    static func parseAmount(_ raw: String, fallback: String) -> (amount: Decimal, currency: String)? {
+    nonisolated static func parseAmount(_ raw: String, fallback: String) -> (amount: Decimal, currency: String)? {
         let code = raw.split { !$0.isLetter }.map { $0.uppercased() }
             .first { $0.count == 3 && Locale.commonISOCurrencyCodes.contains($0) }
         let symbol = symbols.first { raw.contains($0.0) }?.1
@@ -128,5 +128,5 @@ extension ApplePay {
 }
 
 private extension Character {
-    var isASCIIDigit: Bool { isASCII && isNumber }
+    nonisolated var isASCIIDigit: Bool { isASCII && isNumber }
 }

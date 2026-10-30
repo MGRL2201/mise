@@ -68,8 +68,27 @@ extension Accounts {
         let dbs = account("DBS Multiplier", .debit, "SGD", Decimal(string: "4250.30")!)
         let wise = account("Wise USD", .debit, "USD", 800)
         let citi = account("Citi Rewards", .credit, "SGD", Decimal(string: "-640.50")!)
-        _ = account("IBKR", .brokerage, "USD", 12_000)
+        let ibkr = account("IBKR", .brokerage, "USD", 12_000)
         account("Old POSB", .debit, "SGD", 0).archived = true
+
+        // IBKR holdings (#48): priced, a fund valued as a whole, and NVDA without a price.
+        let holdings: [(String, String, HoldingKind, String, Decimal, String, String?, Double)] = [
+            ("VOO", "Vanguard S&P 500 ETF", .stock, "15", 6200, "USD", "552.10", 1),
+            ("AAPL", "Apple", .stock, "20", 3400, "USD", "231.40", 1),
+            ("BTC", "Bitcoin", .crypto, "0.25", 9000, "USD", "68250", 1),
+            ("Endowus Core", "Endowus Core Portfolio", .fund, "1", 15000, "SGD", "18420.55", 20),
+            ("NVDA", "NVIDIA", .stock, "5", 600, "USD", nil, 0),
+        ]
+        for (symbol, name, kind, quantity, cost, currency, price, daysAgo) in holdings {
+            let holding = Holding(symbol: symbol, name: name, kind: kind, quantity: Decimal(string: quantity)!, costBasis: cost, currency: currency)
+            context.insert(holding)
+            holding.account = ibkr
+            if symbol == "BTC" { holding.coinID = "bitcoin" }
+            if let price {
+                holding.price = Decimal(string: price)
+                holding.priceDate = .now - daysAgo * 86_400
+            }
+        }
 
         let groceries = Category(name: "Groceries", icon: "cart", color: 0x34C759)
         let transport = Category(name: "Transport", icon: "car", color: 0x007AFF)
