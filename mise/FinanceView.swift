@@ -562,12 +562,16 @@ struct AccountDetailView: View {
             .listRowBackground(Color(theme.surface))
             if showsHoldings {
                 Section("Holdings") {
+                    let linked = holdings.filter { $0.coinID != nil }
                     if holdings.isEmpty {
                         Text("No holdings yet").foregroundStyle(.secondary)
                     } else {
                         LabeledContent("Value", value: summary.value, format: .currency(code: home))
                         LabeledContent("Gain/Loss") {
                             Text(summary.gain, format: .currency(code: home)).foregroundStyle(summary.gain < 0 ? .red : .green)
+                        }
+                        if let updated = linked.compactMap(\.priceDate).max() {
+                            Text("Prices updated \(updated, format: .relative(presentation: .named))").foregroundStyle(.secondary)
                         }
                         if summary.unpriced > 0 {
                             Text("\(summary.unpriced) without price (not in totals)").foregroundStyle(.secondary)
@@ -577,11 +581,7 @@ struct AccountDetailView: View {
                         }
                         ForEach(holdings) { HoldingRow(holding: $0, editing: $editingHolding, pricing: $pricingHolding) }
                     }
-                    let linked = holdings.filter { $0.coinID != nil }
                     if !linked.isEmpty {
-                        if let updated = linked.compactMap(\.priceDate).max() {
-                            Text("Prices updated \(updated, format: .relative(presentation: .named))").foregroundStyle(.secondary)
-                        }
                         Button("Refresh Prices") { Task { await refreshPrices() } }
                             .disabled(refreshing)
                     }
