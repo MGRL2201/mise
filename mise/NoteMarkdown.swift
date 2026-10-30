@@ -50,7 +50,8 @@ enum NoteMarkdown {
         var text = AttributedString()
         var fence = false
         for (n, line) in normalized.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
-            if n > 0 { text += AttributedString("\n") }
+            // Inside a fence the separator is code too, so a blank fence line types as code.
+            if n > 0 { text += AttributedString("\n", attributes: fence ? AttributeContainer().inlinePresentationIntent(.code) : AttributeContainer()) }
             let afterIndent = line.drop { $0 == " " || $0 == "\t" }
             if fence || opensFence(afterIndent) {
                 fence = !fence || !closesFence(afterIndent)  // opening line, or not yet closed
@@ -252,12 +253,12 @@ enum NoteMarkdown {
     }
 
     /// An opening fence: ``` with no backtick in the info string (CommonMark).
-    private static func opensFence(_ line: Substring) -> Bool {
+    static func opensFence(_ line: Substring) -> Bool {
         line.hasPrefix("```") && !line.drop { $0 == "`" }.contains("`")
     }
 
     /// A closing fence: 3+ backticks and nothing else.
-    private static func closesFence(_ line: Substring) -> Bool {
+    static func closesFence(_ line: Substring) -> Bool {
         let t = line.trimmingCharacters(in: .whitespaces)
         return t.count >= 3 && t.allSatisfy { $0 == "`" }
     }

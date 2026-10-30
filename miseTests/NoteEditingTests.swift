@@ -183,5 +183,73 @@ struct NoteEditingTests {
         let (closed, closedSel) = typeReturn(styled("```\nx\n```", .code), typing: AttributeContainer().inlinePresentationIntent(.code))
         #expect(String(closed.characters) == "```\nx\n```\n")
         #expect(closedSel.typingAttributes(in: closed).inlinePresentationIntent?.contains(.code) != true)
+        // "```swift" inside a fence doesn't close it.
+        let (info, infoSel) = typeReturn(styled("```\nx\n```swift", .code), typing: AttributeContainer().inlinePresentationIntent(.code))
+        #expect(infoSel.typingAttributes(in: info).inlinePresentationIntent?.contains(.code) == true)
+    }
+
+    /// Inserts plain `typed` at character `offset` of `old` and runs applyShortcuts.
+    private func insert(_ typed: String, at offset: Int, in old: AttributedString) -> AttributedString {
+        var t = old
+        let i = t.characters.index(t.startIndex, offsetBy: offset)
+        t.insert(AttributedString(typed), at: i)
+        var sel = AttributedTextSelection(insertionPoint: t.characters.index(t.startIndex, offsetBy: offset + typed.count), typingAttributes: AttributeContainer())
+        NoteEditing.applyShortcuts(old: old, text: &t, selection: &sel)
+        return t
+    }
+
+    @Test func noShortcutsInsideFence() {
+        let loaded = NoteMarkdown.attributed("```\n\n```")
+        #expect(loaded[loaded.characters.index(loaded.startIndex, offsetBy: 3)...].runs.first?.inlinePresentationIntent?.contains(.code) == true)
+        #expect(NoteMarkdown.markdown(insert("- ", at: 4, in: loaded)) == "```\n- \n```")
+        var pasted = AttributedString("```\n- a\n```")
+        var sel = atEnd(pasted)
+        NoteEditing.applyShortcuts(old: AttributedString(), text: &pasted, selection: &sel)
+        #expect(NoteMarkdown.markdown(pasted) == "```\n- a\n```")
+    }
+
+    @Test func quotedHeadingReturnResetsTypingFont() {
+        var title = AttributedString("▍ Title")
+        title.font = NoteMarkdown.headingFont(1)
+        let (t, sel) = typeReturn(title, typing: AttributeContainer().font(NoteMarkdown.headingFont(1)))
+        #expect(String(t.characters) == "▍ Title\n▍ ")
+        #expect(sel.typingAttributes(in: t).font == nil)
+    }
+
+    @Test func midHeadingReturnKeepsTypingFont() {
+        var old = AttributedString("Title")
+        old.font = NoteMarkdown.headingFont(1)
+        var t = old
+        t.insert(AttributedString("\n", attributes: AttributeContainer().font(NoteMarkdown.headingFont(1))), at: t.characters.index(t.startIndex, offsetBy: 2))
+        var sel = AttributedTextSelection(insertionPoint: t.characters.index(t.startIndex, offsetBy: 3),
+                                          typingAttributes: AttributeContainer().font(NoteMarkdown.headingFont(1)))
+        NoteEditing.continueList(old: old, text: &t, selection: &sel)
+        #expect(sel.typingAttributes(in: t).font == NoteMarkdown.headingFont(1))
+    }
+
+    @Test func attributeOnlyChangeIsIgnored() {
+        var t = AttributedString("```")
+        var sel = atEnd(t)
+        NoteEditing.applyShortcuts(old: styled("```", .code), text: &t, selection: &sel)
+        #expect(t.runs.allSatisfy { $0.inlinePresentationIntent == nil })
+    }
+
+    @Test func editAwayFromMarkerKeepsLiteral() {
+        #expect(String(insert("x", at: 5, in: AttributedString("# not")).characters) == "# notx")
+        #expect(String(insert("x", at: 3, in: AttributedString("```")).characters) == "```x")
+        #expect(insert("x", at: 3, in: AttributedString("```")).runs.allSatisfy { $0.inlinePresentationIntent == nil })
+        #expect(String(insert("x", at: 3, in: AttributedString("- y")).characters) == "- yx")
+        #expect(String(insert("b", at: 1, in: AttributedString("a\n- y")).characters) == "ab\n- y")
+    }
+
+    @Test func secondPassIsNoOp() {
+        for (first, _) in [shortcuts(AttributedString("-"), typing: AttributedString(" ")), typeReturn(AttributedString("• a")),
+                           shortcuts(AttributedString("``"), typing: AttributedString("`"))] {
+            var t = first
+            var sel = atEnd(t)
+            NoteEditing.continueList(old: first, text: &t, selection: &sel)
+            NoteEditing.applyShortcuts(old: first, text: &t, selection: &sel)
+            #expect(t == first)
+        }
     }
 }

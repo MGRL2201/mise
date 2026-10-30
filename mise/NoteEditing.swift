@@ -57,28 +57,35 @@ enum NoteEditing {
     /// Turns typed Markdown line prefixes ("# ", "- ", "> ", "[ ] "...) into the editor representation, and a typed
     /// ``` into a code line, in the paragraphs the edit from `old` touched. Idempotent.
     static func applyShortcuts(old: AttributedString, text: inout AttributedString, selection: inout AttributedTextSelection) {
+        guard !old.characters.elementsEqual(text.characters) else { return }  // attribute-only change
         let common = zip(old.characters, text.characters).prefix { $0 == $1 }.count
         let tail = min(zip(old.characters.reversed(), text.characters.reversed()).prefix { $0 == $1 }.count,
                        min(old.characters.count, text.characters.count) - common)
         // Characters after the last touched paragraph; edits never reach them, so this stays valid.
         let after = text.characters.distance(from: paragraphEnd(text, text.characters.index(text.endIndex, offsetBy: -tail)), to: text.endIndex)
         var offset = text.characters.distance(from: text.startIndex, to: paragraphStart(text, text.characters.index(text.startIndex, offsetBy: common)))
+        // Only a marker the edit touched converts: typing after a literal "# x" leaves it literal.
+        func edited(_ lower: Index, _ count: Int) -> Bool {
+            let a = text.characters.distance(from: text.startIndex, to: lower)
+            return a < text.characters.count - tail && a + count > common
+        }
         while true {  // offset = character offset of the paragraph start; indices go stale after each edit
             let start = text.characters.index(text.startIndex, offsetBy: offset)
             let body = text.characters[start...].drop { $0 == " " || $0 == "\t" }.startIndex
-            if isCode(text, body) {
+            if isCode(text, body) || inFence(text, before: start) {
                 // Code line: no shortcuts.
-            } else if text.characters[body...].starts(with: "```") {
+            } else if text.characters[body...].starts(with: "```"), edited(body, 3) {
                 let end = paragraphEnd(text, start)
                 text.transform(updating: &selection) { $0[start..<end].inlinePresentationIntent = .code }
                 setTyping(in: text, selection: &selection, onlyIfIn: offset) { $0.inlinePresentationIntent = flipped($0.inlinePresentationIntent, .code, on: true) }
             } else {
                 let at = text.characters.index(start, offsetBy: lead(text, at: start).quotes.count)
-                if let (from, to) = shortcuts.first(where: { text.characters[at...].starts(with: $0.0) }) {
+                if let (from, to) = shortcuts.first(where: { text.characters[at...].starts(with: $0.0) }), edited(at, from.count) {
                     replace(from, with: to, at: at, in: &text, selection: &selection)
                     continue
                 }
-                if let level = (1...3).first(where: { text.characters[start...].starts(with: String(repeating: "#", count: $0) + " ") }) {
+                if let level = (1...3).first(where: { text.characters[start...].starts(with: String(repeating: "#", count: $0) + " ") }),
+                   edited(start, level + 1) {
                     replace(String(repeating: "#", count: level) + " ", with: "", at: start, in: &text, selection: &selection)
                     let start = text.characters.index(text.startIndex, offsetBy: offset), end = paragraphEnd(text, start)
                     text.transform(updating: &selection) { $0[start..<end].font = NoteMarkdown.headingFont(level) }
@@ -103,12 +110,10 @@ enum NoteEditing {
               String(text.characters[..<newline]) + String(text.characters[cursor...]) == String(old.characters) else { return }
         let start = paragraphStart(text, newline)
         let (quotes, glyph) = lead(text, at: start)
+        // Return in the middle of a heading keeps the heading on both halves.
+        let afterHeading = start < newline && NoteMarkdown.headingLevel(text[start..<newline].runs.first?.font) != nil && paragraphEnd(text, cursor) == cursor
         if start < newline, text[start..<newline].runs.allSatisfy({ $0.inlinePresentationIntent?.contains(.code) == true }) {
-            let fences = text.characters[..<newline].split(separator: "\n", omittingEmptySubsequences: false).filter {
-                let body = $0.drop { $0 == " " || $0 == "\t" }
-                return body.starts(with: "```") && isCode(text, body.startIndex)
-            }
-            let closes = fences.last?.endIndex == newline && fences.count.isMultiple(of: 2)
+            let closes = inFence(text, before: start) && NoteMarkdown.closesFence(String(text.characters[start..<newline])[...])
             setTyping(in: text, selection: &selection) { $0.inlinePresentationIntent = flipped($0.inlinePresentationIntent, .code, on: !closes) }
         } else if quotes.contains(NoteMarkdown.quote) || !glyph.isEmpty {
             if text.characters.distance(from: start, to: newline) == quotes.count + glyph.count, paragraphEnd(text, cursor) == cursor {
@@ -117,9 +122,8 @@ enum NoteEditing {
                 let next = glyph == NoteMarkdown.doneTask ? NoteMarkdown.openTask : Int(glyph.dropLast(2)).map { "\($0 + 1). " } ?? glyph
                 text.transform(updating: &selection) { $0.insert(AttributedString(quotes + next), at: cursor) }
             }
-        } else if start < newline, NoteMarkdown.headingLevel(text[start..<newline].runs.first?.font) != nil {
-            setTyping(in: text, selection: &selection) { $0.font = nil }
         }
+        if afterHeading { setTyping(in: text, selection: &selection) { $0.font = nil } }
     }
 
     // MARK: helpers
@@ -144,6 +148,18 @@ enum NoteEditing {
         if let glyph = NoteMarkdown.prefix(text, at: rest.startIndex) { return (quotes, glyph) }
         let digits = rest.prefix { ("0"..."9").contains($0) }
         return (quotes, !digits.isEmpty && rest.dropFirst(digits.count).starts(with: ". ") ? String(digits) + ". " : "")
+    }
+
+    /// Whether the paragraph at `start` sits inside a code fence, by the serializer's rules.
+    // ponytail: rescans from the document start per paragraph, O(lines²) for a big paste; carry the state if that lags.
+    static func inFence(_ text: AttributedString, before start: Index) -> Bool {
+        var fence = false
+        for p in text.characters[..<start].split(separator: "\n", omittingEmptySubsequences: false).dropLast() {
+            let body = p.drop { $0 == " " || $0 == "\t" }
+            let line = String(body)[...]
+            if fence || (NoteMarkdown.opensFence(line) && isCode(text, body.startIndex)) { fence = !fence || !NoteMarkdown.closesFence(line) }
+        }
+        return fence
     }
 
     private static func isCode(_ text: AttributedString, _ i: Index) -> Bool {
