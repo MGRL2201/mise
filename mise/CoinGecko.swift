@@ -53,9 +53,10 @@ enum CoinGecko {
     }
 
     static func parsePrices(_ data: Data) throws -> [String: [String: Decimal]] {
-        try JSONDecoder().decode([String: [String: Double]].self, from: data).mapValues { quote in
+        // Double? so one null value doesn't fail the whole batch.
+        try JSONDecoder().decode([String: [String: Double?]].self, from: data).mapValues { quote in
             quote.reduce(into: [String: Decimal]()) { result, entry in
-                result[entry.key] = Decimal(string: String(entry.value))
+                if let value = entry.value { result[entry.key] = Decimal(string: String(value)) }
             }
         }
     }
@@ -71,12 +72,12 @@ enum CoinGecko {
 
     /// Writes cached quotes into holdings with a coinID. Holding currency missing
     /// from the quote -> USD quote via EUR cross-rate, unrounded (2dp would zero cheap coins).
-    /// Returns whether any holding changed.
+    /// Skips holdings deleted during the fetch and prices newer than the quote (manual edits).
     @MainActor
-    static func apply(_ prices: CoinPrices, to holdings: [Holding], rates: [String: Decimal]) -> Bool {
-        var changed = false
+    static func apply(_ prices: CoinPrices, to holdings: [Holding], rates: [String: Decimal]) {
         for holding in holdings {
-            guard let id = holding.coinID, let quote = prices.coins[id] else { continue }
+            guard !holding.isDeleted, holding.modelContext != nil,
+                  let id = holding.coinID, let quote = prices.coins[id] else { continue }
             var price = quote[holding.currency.lowercased()]
             if price == nil, let usd = quote["usd"],
                let usdRate = rates["USD"], usdRate != 0,
@@ -86,10 +87,10 @@ enum CoinGecko {
             guard let price else { continue }
             let date = quote["last_updated_at"].map { Date(timeIntervalSince1970: NSDecimalNumber(decimal: $0).doubleValue) }
                 ?? prices.fetchedAt ?? .now
-            if holding.price != price { holding.price = price; changed = true }
-            if holding.priceDate != date { holding.priceDate = date; changed = true }
+            if let current = holding.priceDate, current > date { continue }
+            holding.price = price
+            holding.priceDate = date
         }
-        return changed
     }
 
     /// Networked entry point. Errors are swallowed; offline keeps using the cache.
@@ -121,6 +122,7 @@ enum CoinGecko {
         }
 
         let rates = FXRates.load().rates(on: FXRates.day(now)) ?? [:]
-        if apply(cache, to: holdings, rates: rates) { try? context.save() }
+        apply(cache, to: holdings, rates: rates)
+        try? context.save()
     }
 }

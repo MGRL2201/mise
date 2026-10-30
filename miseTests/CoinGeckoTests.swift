@@ -38,6 +38,16 @@ struct CoinGeckoTests {
         #expect(prices["ethereum"] == ["usd": 2500, "last_updated_at": 1_730_000_100])
     }
 
+    @Test func parsePricesDropsNulls() throws {
+        let json = """
+        {"bitcoin":{"usd":null,"sgd":92000.5,"last_updated_at":1730000000},
+         "ethereum":{"usd":2500}}
+        """
+        let prices = try CoinGecko.parsePrices(Data(json.utf8))
+        #expect(prices["bitcoin"] == ["sgd": Decimal(string: "92000.5")!, "last_updated_at": 1_730_000_000])
+        #expect(prices["ethereum"] == ["usd": 2500])
+    }
+
     @Test func applySetsPricesAndSkipsUnknown() {
         let fetchedAt = Date(timeIntervalSince1970: 2_000_000_000)
         let prices = CoinPrices(fetchedAt: fetchedAt, coins: [
@@ -50,21 +60,28 @@ struct CoinGeckoTests {
         let unknown = holding("dogecoin", price: 5)
         let manual = holding(nil, price: 7)
 
-        let changed = CoinGecko.apply(prices, to: [usd, sgd, chf, unknown, manual], rates: ["EUR": 1, "USD": 2, "CHF": 3])
+        CoinGecko.apply(prices, to: [usd, sgd, chf, unknown, manual], rates: ["EUR": 1, "USD": 2, "CHF": 3])
 
-        #expect(changed)
         #expect(usd.price == 68250 && usd.priceDate == Date(timeIntervalSince1970: 1_730_000_000))
         #expect(sgd.price == 92000)
         #expect(chf.price == Decimal(string: "0.00001851") && chf.priceDate == fetchedAt)
         #expect(unknown.price == 5 && unknown.priceDate == nil)
         #expect(manual.price == 7 && manual.priceDate == nil)
-        #expect(!CoinGecko.apply(prices, to: [usd, sgd, chf, unknown, manual], rates: ["EUR": 1, "USD": 2, "CHF": 3]))
+    }
+
+    @Test func applyKeepsNewerManualPrice() {
+        let prices = CoinPrices(fetchedAt: .now, coins: ["bitcoin": ["usd": 68250, "last_updated_at": 1_730_000_000]])
+        let btc = holding("bitcoin", price: 70000)
+        let manualDate = Date(timeIntervalSince1970: 1_730_000_500)
+        btc.priceDate = manualDate
+        CoinGecko.apply(prices, to: [btc], rates: [:])
+        #expect(btc.price == 70000 && btc.priceDate == manualDate)
     }
 
     @Test func applySkipsMissingRate() {
         let prices = CoinPrices(fetchedAt: .now, coins: ["bitcoin": ["usd": 68250]])
         let jpy = holding("bitcoin", currency: "JPY", price: 1)
-        #expect(!CoinGecko.apply(prices, to: [jpy], rates: ["EUR": 1, "USD": 2]))
+        CoinGecko.apply(prices, to: [jpy], rates: ["EUR": 1, "USD": 2])
         #expect(jpy.price == 1)
     }
 }
