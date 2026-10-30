@@ -32,41 +32,11 @@ struct MiseApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .modifier(AppLockRoot())
-                .modifier(ThemeRoot())
-                .environment(themeStore)
-                .environment(appLock)
-                .environment(reminders)
-                .environment(calendar)
-                .onChange(of: phase, initial: true) { _, phase in
-                    switch phase {
-                    case .active:
-                        AutoBackup.run(context: container.mainContext)
-                        Task {
-                            await CoinGecko.refresh(context: container.mainContext)
-                            await Stocks.refresh(context: container.mainContext)
-                            await FX.refresh(context: container.mainContext)
-                        }
-                        Task { await TravelTime.refresh(store: calendar, prompt: true) }
-                        Task { await DailyPlanning.sync(prompt: false) }
-                        Task { await WeeklyReview.sync(prompt: false) }
-                        Task { await Bills.sync(context: container.mainContext, prompt: false) }
-                        Task { await MonthSummary.sync(prompt: false) }
-                        #if os(iOS)
-                        Self.recordSpikeLaunch()
-                        Task { await WakeAlarms.sync((try? container.mainContext.fetch(FetchDescriptor<WakeAlarm>())) ?? []) }
-                        if WakePending.current() != nil { WakePrompt.shared.show() }
-                        #endif
-                    #if os(iOS)
-                    case .background:
-                        AutoBackup.scheduleRefresh()
-                        TravelTime.scheduleRefresh()
-                        Stocks.scheduleRefresh()
-                    #endif
-                    default: break
-                    }
-                }
+            #if DEBUG
+            if ["notes", "probe"].contains(UserDefaults.standard.string(forKey: "miseSpike")) { NoteEditorSpike() } else { root }  // spike #51
+            #else
+            root
+            #endif
         }
         .modelContainer(container)
         #if os(iOS)
@@ -84,6 +54,44 @@ struct MiseApp: App {
             await Self.refreshPrices(container)
         }
         #endif
+    }
+
+    private var root: some View {
+        ContentView()
+            .modifier(AppLockRoot())
+            .modifier(ThemeRoot())
+            .environment(themeStore)
+            .environment(appLock)
+            .environment(reminders)
+            .environment(calendar)
+            .onChange(of: phase, initial: true) { _, phase in
+                switch phase {
+                case .active:
+                    AutoBackup.run(context: container.mainContext)
+                    Task {
+                        await CoinGecko.refresh(context: container.mainContext)
+                        await Stocks.refresh(context: container.mainContext)
+                        await FX.refresh(context: container.mainContext)
+                    }
+                    Task { await TravelTime.refresh(store: calendar, prompt: true) }
+                    Task { await DailyPlanning.sync(prompt: false) }
+                    Task { await WeeklyReview.sync(prompt: false) }
+                    Task { await Bills.sync(context: container.mainContext, prompt: false) }
+                    Task { await MonthSummary.sync(prompt: false) }
+                    #if os(iOS)
+                    Self.recordSpikeLaunch()
+                    Task { await WakeAlarms.sync((try? container.mainContext.fetch(FetchDescriptor<WakeAlarm>())) ?? []) }
+                    if WakePending.current() != nil { WakePrompt.shared.show() }
+                    #endif
+                #if os(iOS)
+                case .background:
+                    AutoBackup.scheduleRefresh()
+                    TravelTime.scheduleRefresh()
+                    Stocks.scheduleRefresh()
+                #endif
+                default: break
+                }
+            }
     }
 
     #if os(iOS)
