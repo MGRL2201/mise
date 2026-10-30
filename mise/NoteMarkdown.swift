@@ -7,6 +7,10 @@ import SwiftUI
 // ponytail: ``` fences only, ~~~ fences load as plain lines.
 // ponytail: literal "•"/"☐"/"☑"/"▍" typed at a Markdown line start load as list/quote structure.
 // ponytail: nested lists are just preserved leading indentation, no list tree.
+// ponytail: Apple's inline parser drops emphasis/code inside link text and image alt, so "[**a**](u)" saves as "[a](u)".
+// ponytail: link titles are dropped; backticks in plain text are always escaped, so "\\``` x" saves as "\\`\\`\\` x".
+// ponytail: a closing marker between punctuation and a letter ("**foo.**bar") fails CommonMark flanking and reloads
+// as literal asterisks (same for an opener between a letter and punctuation); partly overlapping bold/italic may write "****".
 enum NoteMarkdown {
     static let quote = "▍ "
     static let bullet = "• "
@@ -16,6 +20,9 @@ enum NoteMarkdown {
     private static let listMarkers = [bullet: "- ", openTask: "- [ ] ", doneTask: "- [x] "]
     /// Line starts the parser reads as block markers; written with a leading "\" so they load as text.
     private static let blockStarts = ["# ", "## ", "### ", "- ", "* ", "+ ", ">", "```"]
+    /// Emphasis markers in opening order (outermost first).
+    private static let markers: [(mark: String, bit: InlinePresentationIntent)] =
+        [("**", .stronglyEmphasized), ("*", .emphasized), ("~~", .strikethrough)]
 
     static func headingFont(_ level: Int) -> Font {
         switch level {
@@ -81,20 +88,25 @@ enum NoteMarkdown {
     static func markdown(_ text: AttributedString) -> String {
         var lines: [String] = []
         var fence = false
-        for p in text.characters.split(separator: "\n", omittingEmptySubsequences: false) {
+        for p in text.characters.split(omittingEmptySubsequences: false, whereSeparator: { $0 == "\n" || $0 == "\r\n" || $0 == "\r" }) {
             let raw = String(p)
             let afterIndent = raw.drop { $0 == " " || $0 == "\t" }
-            if fence || afterIndent.hasPrefix("```") {
+            let textStart = text.characters.index(p.endIndex, offsetBy: -afterIndent.count)
+            // Only a ``` that is code opens a fence; typed ``` is text and gets escaped.
+            if fence || (afterIndent.hasPrefix("```") && text[textStart..<p.endIndex].runs.first?.inlinePresentationIntent?.contains(.code) == true) {
                 fence = !fence || !closesFence(afterIndent)
                 lines.append(raw)
                 continue
             }
-            var line = String(raw[..<afterIndent.startIndex])
-            var rest = afterIndent
+            // Leading whitespace inside a code span is code, not indent.
+            let codeFirst = text[p.startIndex..<p.endIndex].runs.first?.inlinePresentationIntent?.contains(.code) == true
+            var line = codeFirst ? "" : String(raw[..<afterIndent.startIndex])
+            var rest = codeFirst ? raw[...] : afterIndent
             while rest.hasPrefix(quote) {
                 line += "> "
                 rest = rest.dropFirst(quote.count)
             }
+            // ponytail: leading whitespace in heading text is written before the "#" (lossless here; 4+ spaces/tab reads as indented code elsewhere).
             if !p.isEmpty, let level = headingLevel(text[p.startIndex..<p.endIndex].runs.first?.font) {
                 line += String(repeating: "#", count: level) + " "
             }
@@ -103,20 +115,89 @@ enum NoteMarkdown {
                 line += listMarkers[glyph]!
                 rest = rest.dropFirst(glyph.count)
             }
-            // ponytail: spike's inline writer; no inline escaping, markers wrap edge whitespace, links/strikethrough dropped.
-            var inline = ""
-            let body = text.characters.index(p.endIndex, offsetBy: -rest.count)
-            for (bits, range) in text[body..<p.endIndex].runs[\.inlinePresentationIntent] {
-                var s = String(text.characters[range])
-                let bits = bits ?? []
-                if bits.contains(.code) { s = "`" + s + "`" }
-                let mark = (bits.contains(.stronglyEmphasized) ? "**" : "") + (bits.contains(.emphasized) ? "*" : "")
-                inline += mark + s + mark
-            }
+            let inline = inlineMarkdown(text[text.characters.index(p.endIndex, offsetBy: -rest.count)..<p.endIndex])
             if blockStarts.contains(where: { inline.hasPrefix($0) }) { line += "\\" }
             lines.append(line + inline)
         }
         return lines.joined(separator: "\n")
+    }
+
+    /// Inline runs → Markdown. Emphasis markers open and close as a stack across runs; links, images,
+    /// code spans and inline HTML are written whole inside them (links innermost, as Apple drops emphasis inside link text).
+    private static func inlineMarkdown(_ text: AttributedSubstring) -> String {
+        let runs = text.runs[\.inlinePresentationIntent, \.link, \.imageURL].map {
+            (text: Substring(String(text.characters[$0.3])), bits: $0.0 ?? [], link: $0.1, image: $0.2)
+        }
+        // Edge whitespace of plain runs keeps only the emphasis shared with that side's neighbour: "**bold** x", not "**bold **x".
+        var segments: [(text: Substring, bits: InlinePresentationIntent, link: URL?, image: URL?)] = []
+        for (i, r) in runs.enumerated() {
+            let s = r.text
+            guard r.link == nil, r.image == nil, r.bits.isDisjoint(with: [.code, .inlineHTML]) else {
+                segments.append(r)
+                continue
+            }
+            let before = i > 0 ? runs[i - 1].bits : []
+            let after = i + 1 < runs.count ? runs[i + 1].bits : []
+            let start = s.firstIndex { !$0.isWhitespace } ?? s.endIndex
+            let end = s.lastIndex { !$0.isWhitespace }.map(s.index(after:)) ?? s.endIndex
+            let pieces = start == s.endIndex
+                ? [(s, r.bits.intersection(before).intersection(after))]
+                : [(s[..<start], r.bits.intersection(before)), (s[start..<end], r.bits), (s[end...], r.bits.intersection(after))]
+            for (t, bits) in pieces where !t.isEmpty { segments.append((t, bits, nil, nil)) }
+        }
+        var out = ""
+        var open: [String] = []
+        for seg in segments {
+            let want = markers.filter { seg.bits.contains($0.bit) }.map(\.mark)
+            if let k = open.firstIndex(where: { !want.contains($0) }) {
+                out += open[k...].reversed().joined()
+                open.removeSubrange(k...)
+            }
+            for m in want where !open.contains(m) {
+                out += m
+                open.append(m)
+            }
+            let piece = written(seg.text, seg.bits, link: seg.link, image: seg.image)
+            if piece.hasPrefix("["), out.hasSuffix("!") { out.insert("\\", at: out.index(before: out.endIndex)) }  // "!" + link is not an image
+            out += piece
+        }
+        return out + open.reversed().joined()
+    }
+
+    private static func written(_ s: Substring, _ bits: InlinePresentationIntent, link: URL?, image: URL?) -> String {
+        if let link, image == nil, !bits.contains(.code), s == link.absoluteString, (link.scheme?.count ?? 0) > 1 { return "<\(s)>" }
+        var out = bits.contains(.code) ? codeSpan(s) : bits.contains(.inlineHTML) ? String(s) : escaped(s)
+        if link != nil || image != nil { out = out.replacingOccurrences(of: "]", with: "\\]") }  // plain "]" needs no escape: "[" always has one
+        if let image { out = "![\(out)](\(destination(image)))" }
+        if let link { out = "[\(out)](\(destination(link)))" }
+        return out
+    }
+
+    /// Shortest backtick fence that no backtick run in the content matches; padded where CommonMark would strip or merge.
+    private static func codeSpan(_ s: Substring) -> String {
+        let runs = Set(s.split { $0 != "`" }.map(\.count))
+        let ticks = String(repeating: "`", count: (1...).first { !runs.contains($0) }!)
+        let pad = s.hasPrefix("`") || s.hasSuffix("`") || (s.hasPrefix(" ") && s.hasSuffix(" ") && s.contains { $0 != " " }) ? " " : ""
+        return ticks + pad + s + pad + ticks
+    }
+
+    /// Backslash-escapes characters Apple's inline parser would read as syntax ("&" too: it decodes entities).
+    private static func escaped(_ s: Substring) -> String {
+        let isWord = { (c: Character) in c.isLetter || c.isNumber }
+        var out = ""
+        for i in s.indices {
+            let c = s[i]
+            let next = s.index(after: i)
+            let intraword = i > s.startIndex && next < s.endIndex && isWord(s[s.index(before: i)]) && isWord(s[next])
+            if "\\*`[<~&".contains(c) || (c == "_" && !intraword) { out += "\\" }
+            out.append(c)
+        }
+        return out
+    }
+
+    private static func destination(_ url: URL) -> String {
+        url.absoluteString.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "(", with: "\\(").replacingOccurrences(of: ")", with: "\\)")
     }
 
     /// A closing fence: 3+ backticks and nothing else.
