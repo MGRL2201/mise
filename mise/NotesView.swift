@@ -36,7 +36,9 @@ struct NotesView: View {
     @State private var deletingFolder: NoteFolder?
     @State private var deletingNote: Note?
     @State private var name = ""
+    #if DEBUG
     @State private var debugOpened = false
+    #endif
 
     var body: some View {
         let folders = allFolders.filter { $0.parent === folder }
@@ -180,20 +182,12 @@ struct NoteDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Tag.name) private var allTags: [Tag]
     @State private var newTag = ""
-    @State private var attributed: AttributedString
+    @State private var attributed = AttributedString()
     @State private var selection = AttributedTextSelection()
-    @State private var baseline: String
-    @State private var parsed: AttributedString  // last programmatic load
+    @State private var baseline = ""
+    @State private var parsed = AttributedString()  // last programmatic load
     @State private var raw = false
     @FocusState private var focused: Bool
-
-    init(note: Note) {
-        _note = Bindable(note)
-        let text = NoteMarkdown.attributed(note.body)
-        _attributed = State(initialValue: text)
-        _parsed = State(initialValue: text)
-        _baseline = State(initialValue: NoteMarkdown.markdown(text))
-    }
 
     var body: some View {
         let tags = (note.tags ?? []).sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
@@ -244,7 +238,7 @@ struct NoteDetailView: View {
         .themedBackground()
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
-                Button(raw ? "Show Formatted" : "Show Markdown", systemImage: raw ? "textformat" : "chevron.left.forwardslash.chevron.right") {
+                Button(raw ? "Show Formatted" : "Show Markdown", systemImage: raw ? "textformat" : "doc.plaintext") {
                     if raw { load() }
                     raw.toggle()
                 }
@@ -272,6 +266,8 @@ struct NoteDetailView: View {
             }
             NoteEditing.commit(attributed, to: note, baseline: &baseline)
         }
+        // Parse on appear, not in init: NavigationLink builds destinations eagerly on every list redraw.
+        .onChange(of: note.persistentModelID, initial: true) { load() }
         .onDisappear { try? modelContext.save() }
         #if DEBUG
         .task { await debugScript() }
@@ -295,7 +291,7 @@ struct NoteDetailView: View {
         Button("Quote", systemImage: "text.quote") { NoteEditing.toggleQuote(in: &attributed, selection: &selection) }
     }
 
-    /// Reparses the body after raw editing; the onChange skips shortcuts and commits nothing for it.
+    /// Parses the body on open, note switch or leaving raw; the onChange skips shortcuts and commits nothing for it.
     private func load() {
         let text = NoteMarkdown.attributed(note.body)
         parsed = text
