@@ -111,6 +111,7 @@ struct MiseApp: App {
     private static func seededContainer() -> ModelContainer {
         let container = try! ModelContainer(for: Schema(Storage.models), configurations: ModelConfiguration(schema: Schema(Storage.models), isStoredInMemoryOnly: true))
         Accounts.seed(container.mainContext)
+        Notes.seed(container.mainContext)
         return container
     }
     #endif

@@ -3,11 +3,12 @@ import SwiftData
 
 /// A user tag. Name identity (trimmed, case-insensitive) is enforced in code,
 /// not by a unique attribute, so CloudKit stays possible.
-// ponytail: tags with no tasks persist on purpose (Notes will share them); no delete/rename UI yet.
+// ponytail: shared by tasks and notes; unused tags persist on purpose; no delete/rename UI yet.
 @Model
 final class Tag {
     var name: String = ""
     @Relationship(inverse: \TaskExtras.tags) var tasks: [TaskExtras]? = []
+    @Relationship(inverse: \Note.tags) var notes: [Note]? = []
 
     init(name: String) {
         self.name = name
