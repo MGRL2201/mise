@@ -21,7 +21,7 @@ struct NoteEditorSpikeTests {
         NoteSpike.applyShortcuts(&t, selection: &sel)
         #expect(String(t.characters) == "Title\n• item\n☐ task\n☑ done")
         let (font, range) = try #require(t.runs[\.font].first)
-        #expect(font == NoteSpike.headingFont(1))
+        #expect(font == NoteMarkdown.headingFont(1))
         #expect(String(t.characters[range]) == "Title")
     }
 
@@ -72,7 +72,7 @@ struct NoteEditorSpikeTests {
         var t = AttributedString("one\ntwo")
         var sel = AttributedTextSelection(range: try #require(t.range(of: "one\n")))
         NoteSpike.toggleHeading(1, in: &t, selection: &sel)
-        #expect(t[try #require(t.range(of: "one"))].runs.allSatisfy { $0.font == NoteSpike.headingFont(1) })
+        #expect(t[try #require(t.range(of: "one"))].runs.allSatisfy { $0.font == NoteMarkdown.headingFont(1) })
         #expect(t[try #require(t.range(of: "two"))].runs.allSatisfy { $0.font == nil })
     }
 
@@ -81,12 +81,12 @@ struct NoteEditorSpikeTests {
         var sel = AttributedTextSelection()
         NoteSpike.applyShortcuts(&t, selection: &sel)
         #expect(String(t.characters) == "• x")
-        #expect(NoteSpike.markdown(t) == "# - x")
+        #expect(NoteMarkdown.markdown(t) == "# - x")
     }
 
     @Test func markdownRoundTrip() {
         let s = "# Title\nSome **bold** and *it* text\n- item\n- [ ] task\n- [x] done"
-        #expect(NoteSpike.markdown(NoteSpike.attributed(markdown: s)) == s)
+        #expect(NoteMarkdown.markdown(NoteMarkdown.attributed(s)) == s)
     }
 }
 #endif
