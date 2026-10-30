@@ -461,6 +461,7 @@ struct AccountDetailView: View {
     @State private var pricingHolding: Holding?
     @State private var exportDocument: CSVDocument?
     @State private var exportError: String?
+    @State private var refreshing = false
     @AppStorage(FX.homeKey) private var home = FX.home()
 
     init(account: Account, rates: FXRates) {
@@ -470,10 +471,16 @@ struct AccountDetailView: View {
 
     /// Editors start FX.refresh on save without awaiting it; await one here, then pick up the rates.
     private func reloadRates() {
-        Task {
-            await FX.refresh(context: modelContext)
-            rates = .load()
-        }
+        Task { await refreshPrices() }
+    }
+
+    /// Crypto prices first (a newly linked coin), then FX, which records the snapshot.
+    private func refreshPrices() async {
+        refreshing = true
+        await CoinGecko.refresh(context: modelContext)
+        await FX.refresh(context: modelContext)
+        rates = .load()
+        refreshing = false
     }
 
     var body: some View {
@@ -557,6 +564,14 @@ struct AccountDetailView: View {
                         }
                         ForEach(holdings) { HoldingRow(holding: $0, editing: $editingHolding, pricing: $pricingHolding) }
                     }
+                    let linked = holdings.filter { $0.coinID != nil }
+                    if !linked.isEmpty {
+                        if let updated = linked.compactMap(\.priceDate).max() {
+                            Text("Prices updated \(updated, format: .relative(presentation: .named))").foregroundStyle(.secondary)
+                        }
+                        Button("Refresh Prices") { Task { await refreshPrices() } }
+                            .disabled(refreshing)
+                    }
                     Button("Add Holding") { newHolding = true }
                     Button("Export All Holdings (CSV)", action: exportHoldings)
                         .disabled(((try? modelContext.fetchCount(FetchDescriptor<Holding>())) ?? 0) == 0)
@@ -580,6 +595,7 @@ struct AccountDetailView: View {
                 .listRowBackground(Color(theme.surface))
             }
         }
+        .refreshable { await refreshPrices() }
         .navigationTitle(account.name)
     }
 
