@@ -69,6 +69,11 @@ struct NotesView: View {
             }
         }
         .navigationDestination(item: $opened) { NoteDetailView(note: $0) }
+        .onAppear {
+            // Sweep blank notes here, not in NoteDetailView.onDisappear, which also fires on a tab switch.
+            for note in allNotes where note.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { modelContext.delete(note) }
+            try? modelContext.save()
+        }
         .alert("New Folder", isPresented: $addingFolder) {
             TextField("Name", text: $name)
             Button("Cancel", role: .cancel) {}
@@ -172,15 +177,6 @@ struct NoteDetailView: View {
     @State private var newTag = ""
 
     var body: some View {
-        // Deleted (blank on disappear) while still on screen, e.g. after a tab switch.
-        if note.modelContext == nil {
-            ContentUnavailableView("Note deleted", systemImage: "note.text")
-        } else {
-            editor
-        }
-    }
-
-    private var editor: some View {
         let tags = (note.tags ?? []).sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         return VStack(alignment: .leading, spacing: 8) {
             ScrollView(.horizontal, showsIndicators: false) {
@@ -221,11 +217,7 @@ struct NoteDetailView: View {
             }
         }
         .onChange(of: note.body) { note.modified = .now }
-        .onDisappear {
-            guard note.modelContext != nil else { return }
-            if note.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { modelContext.delete(note) }
-            try? modelContext.save()
-        }
+        .onDisappear { try? modelContext.save() }
     }
 
     private func addTag(_ name: String) {
