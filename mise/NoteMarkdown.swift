@@ -10,7 +10,10 @@ import SwiftUI
 // ponytail: Apple's inline parser drops emphasis/code inside link text and image alt, so "[**a**](u)" saves as "[a](u)".
 // ponytail: link titles are dropped; backticks in plain text are always escaped, so "\\``` x" saves as "\\`\\`\\` x".
 // ponytail: a closing marker between punctuation and a letter ("**foo.**bar") fails CommonMark flanking and reloads
-// as literal asterisks (same for an opener between a letter and punctuation); partly overlapping bold/italic may write "****".
+// as literal asterisks (same for an opener between a letter and punctuation, and for emphasis ending at a link/code span
+// before a letter or starting at one after a letter, "**[a](u)**s"); partly overlapping bold/italic may write "****".
+// ponytail: bare URLs/emails are found with NSDataDetector and assume its extent matches Apple's autolink extent;
+// where it doesn't ("https://a.b/c&amp;" autolinks only up to "c") the reload shifts text. Swap in Apple's rules if that bites.
 enum NoteMarkdown {
     static let quote = "▍ "
     static let bullet = "• "
@@ -19,7 +22,7 @@ enum NoteMarkdown {
     static let listGlyphs = [bullet, openTask, doneTask]
     private static let listMarkers = [bullet: "- ", openTask: "- [ ] ", doneTask: "- [x] "]
     /// Line starts the parser reads as block markers; written with a leading "\" so they load as text.
-    private static let blockStarts = ["# ", "## ", "### ", "- ", "* ", "+ ", ">", "```"]
+    private static let blockStarts = ["# ", "## ", "### ", "- ", "+ ", ">"]
     /// Emphasis markers in opening order (outermost first).
     private static let markers: [(mark: String, bit: InlinePresentationIntent)] =
         [("**", .stronglyEmphasized), ("*", .emphasized), ("~~", .strikethrough)]
@@ -48,7 +51,7 @@ enum NoteMarkdown {
         for (n, line) in normalized.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
             if n > 0 { text += AttributedString("\n") }
             let afterIndent = line.drop { $0 == " " || $0 == "\t" }
-            if fence || afterIndent.hasPrefix("```") {
+            if fence || opensFence(afterIndent) {
                 fence = !fence || !closesFence(afterIndent)  // opening line, or not yet closed
                 var code = AttributedString(String(line))
                 code.inlinePresentationIntent = .code
@@ -93,7 +96,7 @@ enum NoteMarkdown {
             let afterIndent = raw.drop { $0 == " " || $0 == "\t" }
             let textStart = text.characters.index(p.endIndex, offsetBy: -afterIndent.count)
             // Only a ``` that is code opens a fence; typed ``` is text and gets escaped.
-            if fence || (afterIndent.hasPrefix("```") && text[textStart..<p.endIndex].runs.first?.inlinePresentationIntent?.contains(.code) == true) {
+            if fence || (opensFence(afterIndent) && text[textStart..<p.endIndex].runs.first?.inlinePresentationIntent?.contains(.code) == true) {
                 fence = !fence || !closesFence(afterIndent)
                 lines.append(raw)
                 continue
@@ -125,6 +128,7 @@ enum NoteMarkdown {
     /// Inline runs → Markdown. Emphasis markers open and close as a stack across runs; links, images,
     /// code spans and inline HTML are written whole inside them (links innermost, as Apple drops emphasis inside link text).
     private static func inlineMarkdown(_ text: AttributedSubstring) -> String {
+        let text = unlinkingBareURLs(text)
         let runs = text.runs[\.inlinePresentationIntent, \.link, \.imageURL].map {
             (text: Substring(String(text.characters[$0.3])), bits: $0.0 ?? [], link: $0.1, image: $0.2)
         }
@@ -164,9 +168,30 @@ enum NoteMarkdown {
         return out + open.reversed().joined()
     }
 
+    /// A link that is its own bare URL, as Apple's autolinking makes it, becomes plain text (written raw by `written`).
+    private static func unlinkingBareURLs(_ text: AttributedSubstring) -> AttributedString {
+        var out = AttributedString()
+        for r in text.runs {
+            var piece = AttributedString(text[r.range])
+            let s = String(piece.characters)
+            let before = r.range.lowerBound > text.startIndex ? text.characters[text.characters.index(before: r.range.lowerBound)] : " "
+            let after = text.characters[r.range.upperBound...].drop { "?!.,:*_~)".contains($0) }.first ?? " "
+            if let link = r.link, r.imageURL == nil, (r.inlinePresentationIntent ?? []).isDisjoint(with: [.code, .inlineHTML]),
+               before.isWhitespace || "(*_~".contains(before), after.isWhitespace,
+               let m = bareLinks(s).first, m.range == s.startIndex..<s.endIndex, m.url == link {
+                piece.link = nil
+            }
+            out += piece
+        }
+        return out
+    }
+
     private static func written(_ s: Substring, _ bits: InlinePresentationIntent, link: URL?, image: URL?) -> String {
-        if let link, image == nil, !bits.contains(.code), s == link.absoluteString, (link.scheme?.count ?? 0) > 1 { return "<\(s)>" }
-        var out = bits.contains(.code) ? codeSpan(s) : bits.contains(.inlineHTML) ? String(s) : escaped(s)
+        if let link, image == nil, !bits.contains(.code), s == link.absoluteString, (link.scheme?.count ?? 0) > 1, !s.contains("&") {
+            return "<\(s)>"  // Apple decodes entities inside <...>
+        }
+        var out = bits.contains(.code) ? codeSpan(s) : bits.contains(.inlineHTML) ? String(s)
+            : link == nil && image == nil ? escapedKeepingURLs(s) : escaped(s)
         if link != nil || image != nil { out = out.replacingOccurrences(of: "]", with: "\\]") }  // plain "]" needs no escape: "[" always has one
         if let image { out = "![\(out)](\(destination(image)))" }
         if let link { out = "[\(out)](\(destination(link)))" }
@@ -181,7 +206,30 @@ enum NoteMarkdown {
         return ticks + pad + s + pad + ticks
     }
 
-    /// Backslash-escapes characters Apple's inline parser would read as syntax ("&" too: it decodes entities).
+    /// `escaped`, except bare URLs/emails stay raw: Apple autolinks them on load and keeps a backslash inside as text.
+    private static func escapedKeepingURLs(_ s: Substring) -> String {
+        let s = String(s)
+        var out = ""
+        var i = s.startIndex
+        for m in bareLinks(s) {
+            out += escaped(s[i..<m.range.lowerBound]) + s[m.range]
+            i = m.range.upperBound
+        }
+        return out + escaped(s[i...])
+    }
+
+    private static let detector = try! NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+
+    /// URLs and emails Apple's parser autolinks in plain text (GFM: scheme://, www., emails).
+    private static func bareLinks(_ s: String) -> [(range: Range<String.Index>, url: URL)] {
+        detector.matches(in: s, range: NSRange(s.startIndex..., in: s)).compactMap { m in
+            guard let r = Range(m.range, in: s), let url = m.url else { return nil }
+            let t = s[r].lowercased()
+            return url.scheme == "mailto" || ["http://", "https://", "ftp://", "www.", "xmpp:"].contains(where: t.hasPrefix) ? (r, url) : nil
+        }
+    }
+
+    /// Backslash-escapes characters Apple's inline parser would read as syntax ("&" too where it starts an entity).
     private static func escaped(_ s: Substring) -> String {
         let isWord = { (c: Character) in c.isLetter || c.isNumber }
         var out = ""
@@ -189,7 +237,8 @@ enum NoteMarkdown {
             let c = s[i]
             let next = s.index(after: i)
             let intraword = i > s.startIndex && next < s.endIndex && isWord(s[s.index(before: i)]) && isWord(s[next])
-            if "\\*`[<~&".contains(c) || (c == "_" && !intraword) { out += "\\" }
+            let entity = c == "&" && s[next...].prefixMatch(of: /#?[A-Za-z0-9]+;/) != nil
+            if "\\*`[<~".contains(c) || entity || (c == "_" && !intraword) { out += "\\" }
             out.append(c)
         }
         return out
@@ -198,6 +247,11 @@ enum NoteMarkdown {
     private static func destination(_ url: URL) -> String {
         url.absoluteString.replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "(", with: "\\(").replacingOccurrences(of: ")", with: "\\)")
+    }
+
+    /// An opening fence: ``` with no backtick in the info string (CommonMark).
+    private static func opensFence(_ line: Substring) -> Bool {
+        line.hasPrefix("```") && !line.drop { $0 == "`" }.contains("`")
     }
 
     /// A closing fence: 3+ backticks and nothing else.

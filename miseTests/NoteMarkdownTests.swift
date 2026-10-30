@@ -52,7 +52,8 @@ struct NoteMarkdownTests {
         ("**a [b](https://x.com) c**", "**a [b](https://x.com) c**"),
         ("**[a](https://x.com)**", "**[a](https://x.com)**"),
         ("[a](https://x.com/a\\(b\\)c)", "[a](https://x.com/a\\(b\\)c)"),
-        ("<https://example.com>", "<https://example.com>"),
+        ("<https://example.com>", "https://example.com"),  // a link that is its own bare URL saves bare
+        ("<ftp://a.b/c.>", "<ftp://a.b/c.>"),
         ("wow\\![a](https://x.com)", "wow\\![a](https://x.com)"),
         ("![alt](https://x.com/i.png)", "![alt](https://x.com/i.png)"),
         ("a \\* b \\_ c \\` d \\[e\\] \\\\ f \\< g", "a \\* b \\_ c \\` d \\[e] \\\\ f \\< g"),
@@ -69,7 +70,10 @@ struct NoteMarkdownTests {
         ("> *quote*", "> *quote*"),
         ("# **H**", "# **H**"),
         ("**bold *both* bold**", "**bold *both* bold**"),
-        ("&amp;", "\\&"),  // Apple decodes entities, so "&" is escaped
+        ("&amp;", "&"),  // Apple decodes entities; a lone "&" needs no escape
+        ("AT&T", "AT&T"),
+        ("\\&copy;", "\\&copy;"),
+        ("```a`b``c```", "```a`b``c```"),  // a backtick in the info string: code span, not a fence
     ]
 
     @Test func roundTripFixtures() {
@@ -143,6 +147,47 @@ struct NoteMarkdownTests {
         let r = try #require(a.runs.first)
         #expect(String(a.characters[r.range]) == "a")
         #expect(r.link == URL(string: "https://example.com"))
+    }
+
+    /// Bare URLs and emails save raw: Apple autolinks them on load and would keep any backslash as visible text.
+    @Test func bareURLsStayRaw() {
+        for (text, md) in [
+            ("https://a.b/?x=1&y=2", "https://a.b/?x=1&y=2"),
+            ("see https://x.com/a_b_/~u/*p* now", "see https://x.com/a_b_/~u/*p* now"),
+            ("www.x.com/a_b", "www.x.com/a_b"),
+            ("mail me@x.com", "mail me@x.com"),
+        ] {
+            expectWrites(AttributedString(text), md)
+            #expect(String(NoteMarkdown.attributed(md).characters) == text)
+        }
+    }
+
+    @Test func autolinkWithEntityKeepsText() throws {
+        var a = AttributedString("https://a.b/?x=1&amp;y")
+        a.link = URL(string: "https://a.b/?x=1&amp;y")
+        expectWrites(a, "https://a.b/?x=1&amp;y")
+        let r = try #require(NoteMarkdown.attributed("https://a.b/?x=1&amp;y").runs.first)
+        #expect(r.link == a.link)
+        var ftp = AttributedString("ftp://a.b/?x&amp;y")
+        ftp.link = URL(string: "ftp://a.b/?x&amp;y")
+        ftp = AttributedString("x") + ftp  // glued to a letter, so not bare
+        #expect(String(NoteMarkdown.attributed(NoteMarkdown.markdown(ftp)).characters) == "xftp://a.b/?x&amp;y")
+    }
+
+    @Test func entityLikeTextStaysLiteral() {
+        expectWrites(AttributedString("&amp;"), "\\&amp;")
+        expectWrites(AttributedString("&copy; AT&T"), "\\&copy; AT&T")
+        #expect(String(NoteMarkdown.attributed("\\&copy;").characters) == "&copy;")
+    }
+
+    /// A code span needing a ``` delimiter at line start is not a fence (CommonMark: no backtick in the info string).
+    @Test func backtickInfoStringIsNotAFence() throws {
+        expectWrites(run("a`b``c", .code), "```a`b``c```")
+        let t = NoteMarkdown.attributed("```a`b``c```")
+        #expect(String(t.characters) == "a`b``c")
+        #expect(t.runs.allSatisfy { $0.inlinePresentationIntent == .code })
+        let next = NoteMarkdown.attributed("```a`b``c```\n**b**")
+        #expect(try #require(next.runs.last).inlinePresentationIntent == .stronglyEmphasized)
     }
 
     /// The writer's line-start escaping relies on Apple's inline parser dropping these backslashes.
