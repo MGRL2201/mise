@@ -40,8 +40,7 @@ struct NotesView: View {
     var body: some View {
         let folders = allFolders.filter { $0.parent === folder }
         let notes = Notes.sorted(allNotes.filter { $0.folder === folder })
-        // ZStack, not Group: Group pushes .onAppear onto each branch, so the empty-to-List flip would sweep a new note.
-        ZStack {
+        Group {
             if folders.isEmpty && notes.isEmpty {
                 ContentUnavailableView {
                     Label("No notes", systemImage: "note.text")
@@ -70,11 +69,6 @@ struct NotesView: View {
             }
         }
         .navigationDestination(item: $opened) { NoteDetailView(note: $0) }
-        .onAppear {
-            // Sweep blank notes here, not in NoteDetailView.onDisappear, which also fires on a tab switch.
-            for note in allNotes where note.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { modelContext.delete(note) }
-            try? modelContext.save()
-        }
         .alert("New Folder", isPresented: $addingFolder) {
             TextField("Name", text: $name)
             Button("Cancel", role: .cancel) {}
