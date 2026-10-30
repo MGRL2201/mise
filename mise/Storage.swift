@@ -19,6 +19,8 @@ enum Storage {
         Goal.self,
         NetWorthSnapshot.self,
         Holding.self,
+        NoteFolder.self,
+        Note.self,
     ]
 
     /// DEBUG `-miseSeedFinance YES`: in-memory seeded store; shared side effects (backup, AlarmKit) must skip.
