@@ -13,7 +13,8 @@ import SwiftUI
 // as literal asterisks (same for an opener between a letter and punctuation, and for emphasis ending at a link/code span
 // before a letter or starting at one after a letter, "**[a](u)**s"); partly overlapping bold/italic may write "****".
 // ponytail: bare URLs/emails are found with NSDataDetector and assume its extent matches Apple's autolink extent;
-// where it doesn't ("https://a.b/c&amp;" autolinks only up to "c") the reload shifts text. Swap in Apple's rules if that bites.
+// where it doesn't ("https://a.b/c&amp;" autolinks only up to "c") the reload shifts text, and a URL ending in "*" or "~"
+// inside an emphasized run can close the emphasis early. Swap in Apple's rules if that bites.
 enum NoteMarkdown {
     static let quote = "▍ "
     static let bullet = "• "
@@ -171,13 +172,14 @@ enum NoteMarkdown {
     /// A link that is its own bare URL, as Apple's autolinking makes it, becomes plain text (written raw by `written`).
     private static func unlinkingBareURLs(_ text: AttributedSubstring) -> AttributedString {
         var out = AttributedString()
-        for r in text.runs {
-            var piece = AttributedString(text[r.range])
+        for (link, image, bits, range) in text.runs[\.link, \.imageURL, \.inlinePresentationIntent] {
+            var piece = AttributedString(text[range])
             let s = String(piece.characters)
-            let before = r.range.lowerBound > text.startIndex ? text.characters[text.characters.index(before: r.range.lowerBound)] : " "
-            let after = text.characters[r.range.upperBound...].drop { "?!.,:*_~)".contains($0) }.first ?? " "
-            if let link = r.link, r.imageURL == nil, (r.inlinePresentationIntent ?? []).isDisjoint(with: [.code, .inlineHTML]),
+            let before = range.lowerBound > text.startIndex ? text.characters[text.characters.index(before: range.lowerBound)] : " "
+            let after = text.characters[range.upperBound...].drop { "?!.,:*_~)".contains($0) }.first ?? " "
+            if let link, image == nil, (bits ?? []).isDisjoint(with: [.code, .inlineHTML]),
                before.isWhitespace || "(*_~".contains(before), after.isWhitespace,
+               let last = s.last, !"?!.,:*_~'\"".contains(last),  // Apple trims these from an autolink, the detector keeps them
                let m = bareLinks(s).first, m.range == s.startIndex..<s.endIndex, m.url == link {
                 piece.link = nil
             }

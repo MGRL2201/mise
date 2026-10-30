@@ -54,6 +54,8 @@ struct NoteMarkdownTests {
         ("[a](https://x.com/a\\(b\\)c)", "[a](https://x.com/a\\(b\\)c)"),
         ("<https://example.com>", "https://example.com"),  // a link that is its own bare URL saves bare
         ("<ftp://a.b/c.>", "<ftp://a.b/c.>"),
+        ("a <https://a.b/x_> y", "a <https://a.b/x_> y"),  // Apple's autolink would trim the "_"
+        ("a <https://a.b/x*> y", "a <https://a.b/x*> y"),
         ("wow\\![a](https://x.com)", "wow\\![a](https://x.com)"),
         ("![alt](https://x.com/i.png)", "![alt](https://x.com/i.png)"),
         ("a \\* b \\_ c \\` d \\[e\\] \\\\ f \\< g", "a \\* b \\_ c \\` d \\[e] \\\\ f \\< g"),
@@ -160,6 +162,24 @@ struct NoteMarkdownTests {
             expectWrites(AttributedString(text), md)
             #expect(String(NoteMarkdown.attributed(md).characters) == text)
         }
+    }
+
+    @Test func trimmedTrailingCharKeepsLinkTarget() throws {
+        for url in ["https://a.b/x_", "https://a.b/x*"] {
+            let md = NoteMarkdown.markdown(NoteMarkdown.attributed("a <\(url)> y"))
+            let r = try #require(NoteMarkdown.attributed(md).runs.first { $0.link != nil })
+            #expect(r.link == URL(string: url))
+            #expect(NoteMarkdown.markdown(NoteMarkdown.attributed(md)) == md)
+        }
+    }
+
+    @Test func foreignAttributeDoesNotStopUnlink() {
+        var plain = AttributedString("https://a.b/x")
+        plain.link = URL(string: "https://a.b/x")
+        var coloured = plain
+        let mid = coloured.characters.index(coloured.startIndex, offsetBy: 6)
+        coloured[mid...].swiftUI.foregroundColor = .red
+        expectWrites(coloured, NoteMarkdown.markdown(plain))
     }
 
     @Test func autolinkWithEntityKeepsText() throws {
