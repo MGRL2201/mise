@@ -14,10 +14,33 @@ struct NoteEditingTests {
         return t.characters.distance(from: t.startIndex, to: i)
     }
 
+    /// `s` with every character carrying `intent`.
+    private func styled(_ s: String, _ intent: InlinePresentationIntent) -> AttributedString {
+        var t = AttributedString(s)
+        t.inlinePresentationIntent = intent
+        return t
+    }
+
+    /// Types `typed` at the end of `old` and runs the shortcuts on it.
+    private func shortcuts(_ old: AttributedString, typing typed: AttributedString) -> (AttributedString, AttributedTextSelection) {
+        var t = old + typed
+        var sel = atEnd(t)
+        NoteEditing.applyShortcuts(old: old, text: &t, selection: &sel)
+        return (t, sel)
+    }
+
+    /// Types Return at the end of `old` and runs continueList on it.
+    private func typeReturn(_ old: AttributedString, typing: AttributeContainer = AttributeContainer()) -> (AttributedString, AttributedTextSelection) {
+        var t = old + AttributedString("\n")
+        var sel = AttributedTextSelection(insertionPoint: t.endIndex, typingAttributes: typing)
+        NoteEditing.continueList(old: old, text: &t, selection: &sel)
+        return (t, sel)
+    }
+
     @Test func shortcutsConvertPrefixes() throws {
         var t = AttributedString("# Title\n- item\n- [ ] task\n[x] done")
         var sel = AttributedTextSelection()
-        NoteEditing.applyShortcuts(&t, selection: &sel)
+        NoteEditing.applyShortcuts(old: AttributedString(), text: &t, selection: &sel)
         #expect(String(t.characters) == "Title\n• item\n☐ task\n☑ done")
         let (font, range) = try #require(t.runs[\.font].first)
         #expect(font == NoteMarkdown.headingFont(1))
@@ -27,7 +50,7 @@ struct NoteEditingTests {
     @Test func typedShortcutKeepsCursor() {
         var t = AttributedString("- ")
         var sel = atEnd(t)
-        NoteEditing.applyShortcuts(&t, selection: &sel)
+        NoteEditing.applyShortcuts(old: AttributedString(), text: &t, selection: &sel)
         #expect(String(t.characters) == "• ")
         #expect(cursor(sel, in: t) == 2)
     }
@@ -78,7 +101,7 @@ struct NoteEditingTests {
     @Test func prefixInHeadingKeepsHeadingFont() {
         var t = AttributedString("# - x")
         var sel = AttributedTextSelection()
-        NoteEditing.applyShortcuts(&t, selection: &sel)
+        NoteEditing.applyShortcuts(old: AttributedString(), text: &t, selection: &sel)
         #expect(String(t.characters) == "• x")
         #expect(NoteMarkdown.markdown(t) == "# - x")
     }
@@ -86,5 +109,79 @@ struct NoteEditingTests {
     @Test func markdownRoundTrip() {
         let s = "# Title\nSome **bold** and *it* text\n- item\n- [ ] task\n- [x] done"
         #expect(NoteMarkdown.markdown(NoteMarkdown.attributed(s)) == s)
+    }
+
+    @Test func onlyEditedParagraph() {
+        let (t, sel) = shortcuts(AttributedString("- x\n-"), typing: AttributedString(" "))
+        #expect(String(t.characters) == "- x\n• ")
+        #expect(cursor(sel, in: t) == 6)
+    }
+
+    @Test func skipsCodeLines() {
+        let (t, _) = shortcuts(styled("```\n-", .code), typing: styled(" ", .code))
+        #expect(String(t.characters) == "```\n- ")
+    }
+
+    @Test func backticksBecomeCode() {
+        let (t, sel) = shortcuts(AttributedString("``"), typing: AttributedString("`"))
+        #expect(t.runs.allSatisfy { $0.inlinePresentationIntent?.contains(.code) == true })
+        #expect(sel.typingAttributes(in: t).inlinePresentationIntent?.contains(.code) == true)
+        #expect(NoteMarkdown.markdown(t) == "```")
+    }
+
+    @Test func quoteShortcuts() {
+        #expect(String(shortcuts(AttributedString(), typing: AttributedString("> ")).0.characters) == "▍ ")
+        #expect(String(shortcuts(AttributedString("▍ -"), typing: AttributedString(" ")).0.characters) == "▍ • ")
+        #expect(String(shortcuts(AttributedString("▍ >"), typing: AttributedString(" ")).0.characters) == "▍ ▍ ")
+        #expect(NoteMarkdown.markdown(AttributedString("▍ • x")) == "> - x")
+    }
+
+    @Test func boldParagraphBulletNotBold() throws {
+        var t = styled("- x", .stronglyEmphasized)
+        var sel = AttributedTextSelection()
+        NoteEditing.applyShortcuts(old: AttributedString(), text: &t, selection: &sel)
+        #expect(String(t.characters) == "• x")
+        #expect(t[try #require(t.range(of: "• "))].runs.allSatisfy { $0.inlinePresentationIntent == nil })
+        #expect(t[try #require(t.range(of: "x"))].runs.allSatisfy { $0.inlinePresentationIntent == .stronglyEmphasized })
+    }
+
+    @Test func headingReturnResetsTypingFont() {
+        var title = AttributedString("Title")
+        title.font = NoteMarkdown.headingFont(1)
+        let (t, sel) = typeReturn(title, typing: AttributeContainer().font(NoteMarkdown.headingFont(1)))
+        #expect(String(t.characters) == "Title\n")
+        #expect(sel.typingAttributes(in: t).font == nil)
+    }
+
+    @Test func pasteDoesNotContinue() {
+        let old = AttributedString("• x")
+        var t = AttributedString("• x\na\nb")
+        var sel = atEnd(t)
+        NoteEditing.continueList(old: old, text: &t, selection: &sel)
+        #expect(String(t.characters) == "• x\na\nb")
+    }
+
+    @Test func numberedContinues() {
+        let (t, sel) = typeReturn(AttributedString("1. a"))
+        #expect(String(t.characters) == "1. a\n2. ")
+        #expect(cursor(sel, in: t) == 8)
+        let (ended, endSel) = typeReturn(t)
+        #expect(String(ended.characters) == "1. a\n")
+        #expect(cursor(endSel, in: ended) == 5)
+    }
+
+    @Test func quotedBulletContinues() {
+        #expect(String(typeReturn(AttributedString("▍ • a")).0.characters) == "▍ • a\n▍ • ")
+        #expect(String(typeReturn(AttributedString("  ☑ a")).0.characters) == "  ☑ a\n  ☐ ")
+        #expect(String(typeReturn(AttributedString("▍ ▍ ")).0.characters) == "")
+    }
+
+    @Test func codeReturn() {
+        let (inside, insideSel) = typeReturn(styled("```\nx", .code))
+        #expect(String(inside.characters) == "```\nx\n")
+        #expect(insideSel.typingAttributes(in: inside).inlinePresentationIntent?.contains(.code) == true)
+        let (closed, closedSel) = typeReturn(styled("```\nx\n```", .code), typing: AttributeContainer().inlinePresentationIntent(.code))
+        #expect(String(closed.characters) == "```\nx\n```\n")
+        #expect(closedSel.typingAttributes(in: closed).inlinePresentationIntent?.contains(.code) != true)
     }
 }
