@@ -11,6 +11,11 @@ struct SettingsView: View {
     @State private var stockAPIKeyInput = ""
     @State private var stockAPIKeySaved = Keychain.get(Keychain.stockAPIKey) != nil
     @State private var stockAPIKeyError: OSStatus?
+    @State private var stockStatus = StockQuotes()
+    @AppStorage(StockProvider.key) private var stockProvider = StockProvider.finnhub
+    #if DEBUG
+    @State private var debugScrolled = false
+    #endif
     @State private var lockUnavailableMessage: String?
     @Environment(\.modelContext) private var modelContext
     @State private var exportDocument: BackupDocument?
@@ -62,255 +67,292 @@ struct SettingsView: View {
 
     var body: some View {
         @Bindable var lock = lock
-        Form {
-            Section("Security") {
-                Picker("App lock", selection: $lock.mode) {
-                    ForEach(LockMode.allCases, id: \.self) { Text($0.title).tag($0) }
-                }
-                .onChange(of: lock.mode) { _, mode in
-                    guard mode != .off, !AppLock.isAvailable else {
-                        lockUnavailableMessage = nil
-                        return
+        ScrollViewReader { proxy in
+            Form {
+                Section("Security") {
+                    Picker("App lock", selection: $lock.mode) {
+                        ForEach(LockMode.allCases, id: \.self) { Text($0.title).tag($0) }
                     }
-                    lock.mode = .off
-                    lockUnavailableMessage = "Set a device passcode to enable the lock."
+                    .onChange(of: lock.mode) { _, mode in
+                        guard mode != .off, !AppLock.isAvailable else {
+                            lockUnavailableMessage = nil
+                            return
+                        }
+                        lock.mode = .off
+                        lockUnavailableMessage = "Set a device passcode to enable the lock."
+                    }
+                    if let lockUnavailableMessage {
+                        Text(lockUnavailableMessage).foregroundStyle(.red)
+                    }
+                    Picker("Require unlock", selection: $lock.graceSeconds) {
+                        ForEach(AppLock.graceOptions, id: \.seconds) { Text($0.title).tag($0.seconds) }
+                    }
+                    .disabled(lock.mode == .off)
                 }
-                if let lockUnavailableMessage {
-                    Text(lockUnavailableMessage).foregroundStyle(.red)
-                }
-                Picker("Require unlock", selection: $lock.graceSeconds) {
-                    ForEach(AppLock.graceOptions, id: \.seconds) { Text($0.title).tag($0.seconds) }
-                }
-                .disabled(lock.mode == .off)
-            }
-            .listRowBackground(Color(theme.surface))
+                .listRowBackground(Color(theme.surface))
 
-            Section {
-                CurrencyPicker(title: "Home currency", selection: $homeCurrency)
-                .onChange(of: homeCurrency) { Task { await FX.rebase(context: modelContext) } }
-                SecureField("Stock price API key", text: $stockAPIKeyInput)
-                Text(stockAPIKeySaved ? "A key is stored." : "No key stored.")
-                    .foregroundStyle(.secondary)
-                if let stockAPIKeyError {
-                    Text("Couldn't save key (OSStatus \(stockAPIKeyError))")
-                        .foregroundStyle(.red)
+                Section {
+                    CurrencyPicker(title: "Home currency", selection: $homeCurrency)
+                    .onChange(of: homeCurrency) { Task { await FX.rebase(context: modelContext) } }
+                    Toggle("Month-end summary", isOn: $monthEnd)
+                    if monthEnd {
+                        DatePicker("Time", selection: time($monthEndTime), displayedComponents: .hourAndMinute)
+                    }
+                } header: {
+                    Text("Finance")
+                } footer: {
+                    Text("Month-end summary: a notification on the last day of each month that opens a summary of spend vs budget.")
                 }
-                HStack {
-                    Button("Save") {
-                        do {
-                            try Keychain.set(stockAPIKeyInput, for: Keychain.stockAPIKey)
-                            stockAPIKeyInput = ""
-                            stockAPIKeySaved = true
-                            stockAPIKeyError = nil
-                        } catch let error as Keychain.Error {
-                            stockAPIKeyError = error.status
-                        } catch {
-                            stockAPIKeyError = -1
+                .onChange(of: monthEnd) { Task { await MonthSummary.sync(prompt: true) } }
+                .onChange(of: monthEndTime) { Task { await MonthSummary.sync(prompt: true) } }
+                .listRowBackground(Color(theme.surface))
+
+                Section {
+                    Picker("Provider", selection: $stockProvider) {
+                        ForEach(StockProvider.allCases, id: \.self) { Text($0.label).tag($0) }
+                    }
+                    SecureField("API key", text: $stockAPIKeyInput)
+                    Text(stockAPIKeySaved ? "A key is stored." : "No key stored.")
+                        .foregroundStyle(.secondary)
+                    if let stockAPIKeyError {
+                        Text("Couldn't save key (OSStatus \(stockAPIKeyError))")
+                            .foregroundStyle(.red)
+                    }
+                    if let fetchedAt = stockStatus.fetchedAt {
+                        Text("Last updated \(fetchedAt, format: .relative(presentation: .named))")
+                            .foregroundStyle(.secondary)
+                    }
+                    if let lastError = stockStatus.lastError {
+                        Text(lastError).foregroundStyle(.red)
+                    }
+                    HStack {
+                        Button("Save") {
+                            do {
+                                try Keychain.set(stockAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines), for: Keychain.stockAPIKey)
+                                stockAPIKeyInput = ""
+                                stockAPIKeySaved = true
+                                stockAPIKeyError = nil
+                                Task {
+                                    await Stocks.refresh(context: modelContext)
+                                    await FX.refresh(context: modelContext)
+                                    stockStatus = StockQuotes.load()
+                                }
+                            } catch let error as Keychain.Error {
+                                stockAPIKeyError = error.status
+                            } catch {
+                                stockAPIKeyError = -1
+                            }
+                        }
+                        .disabled(stockAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        Button("Remove", role: .destructive) {
+                            do {
+                                try Keychain.delete(Keychain.stockAPIKey)
+                                stockAPIKeyInput = ""
+                                stockAPIKeySaved = false
+                                stockAPIKeyError = nil
+                            } catch let error as Keychain.Error {
+                                stockAPIKeyError = error.status
+                            } catch {
+                                stockAPIKeyError = -1
+                            }
+                        }
+                        .disabled(!stockAPIKeySaved)
+                    }
+                    Link("Get a free \(stockProvider.label) key", destination: stockProvider.keyURL)
+                } header: {
+                    Text("Stock Prices")
+                } footer: {
+                    Text("Prices are taken as the holding's currency; use the provider's ticker, e.g. AAPL or D05.SI. Finnhub allows 60 calls a minute; Alpha Vantage 25 a day, so prices refresh a few times a day. The key stays in this device's Keychain and is not included in backups.")
+                }
+                .id("stocks")
+                .listRowBackground(Color(theme.surface))
+
+                Section("Calendar") {
+                    #if os(iOS)
+                    NavigationLink("Calendars") { CalendarSettingsView() }
+                    #else
+                    // Mac detail column has no NavigationStack to push onto.
+                    Button("Calendars…") { showingCalendarSettings = true }
+                        .sheet(isPresented: $showingCalendarSettings) { CalendarSettingsSheet() }
+                    #endif
+                }
+                .listRowBackground(Color(theme.surface))
+
+                Section {
+                    Picker("Travel by", selection: $travelTransport) {
+                        ForEach(TravelTime.Transport.allCases, id: \.self) { Text($0.title) }
+                    }
+                    Stepper("Leave \(travelBuffer) min early", value: $travelBuffer, in: 0...120, step: 5)
+                } header: {
+                    Text("Leave-now alerts")
+                } footer: {
+                    Text("Travel time is refreshed when the app opens and when iOS runs background refresh, so it can be out of date.")
+                }
+                .onChange(of: travelTransport) { Task { await TravelTime.refresh(store: calendars, prompt: false) } }
+                .onChange(of: travelBuffer) { Task { await TravelTime.refresh(store: calendars, prompt: false) } }
+                .listRowBackground(Color(theme.surface))
+
+                Section {
+                    DatePicker("Start", selection: time($workStart), displayedComponents: .hourAndMinute)
+                    DatePicker("End", selection: time($workEnd), displayedComponents: .hourAndMinute)
+                    HStack {
+                        ForEach(weekdayOrder, id: \.self) { day in
+                            Toggle(Calendar.current.veryShortWeekdaySymbols[day - 1], isOn: workday(day))
+                                .accessibilityLabel(Calendar.current.weekdaySymbols[day - 1])
+                                .frame(maxWidth: .infinity)
                         }
                     }
-                    .disabled(stockAPIKeyInput.isEmpty)
-                    Button("Clear", role: .destructive) {
-                        do {
-                            try Keychain.delete(Keychain.stockAPIKey)
-                            stockAPIKeyInput = ""
-                            stockAPIKeySaved = false
-                            stockAPIKeyError = nil
-                        } catch let error as Keychain.Error {
-                            stockAPIKeyError = error.status
-                        } catch {
-                            stockAPIKeyError = -1
-                        }
+                    .toggleStyle(.button)
+                    .buttonStyle(.bordered)  // separate tap targets inside a Form row
+                    if workEnd <= workStart {
+                        Text("End must be after start, so no slots will be suggested.").foregroundStyle(.red)
                     }
-                    .disabled(!stockAPIKeySaved)
+                } header: {
+                    Text("Working hours")
+                } footer: {
+                    Text("Used to suggest free slots for tasks.")
                 }
-                Toggle("Month-end summary", isOn: $monthEnd)
-                if monthEnd {
-                    DatePicker("Time", selection: time($monthEndTime), displayedComponents: .hourAndMinute)
-                }
-            } header: {
-                Text("Finance")
-            } footer: {
-                Text("Month-end summary: a notification on the last day of each month that opens a summary of spend vs budget.")
-            }
-            .onChange(of: monthEnd) { Task { await MonthSummary.sync(prompt: true) } }
-            .onChange(of: monthEndTime) { Task { await MonthSummary.sync(prompt: true) } }
-            .listRowBackground(Color(theme.surface))
+                .listRowBackground(Color(theme.surface))
 
-            Section("Calendar") {
+                Section {
+                    Toggle("Plan your day reminder", isOn: $dailyPlanning)
+                    if dailyPlanning {
+                        DatePicker("Time", selection: time($dailyPlanningTime), displayedComponents: .hourAndMinute)
+                    }
+                } header: {
+                    Text("Daily planning")
+                } footer: {
+                    Text("A notification each day that opens a screen to pick today's tasks and schedule them.")
+                }
+                .onChange(of: dailyPlanning) { Task { await DailyPlanning.sync(prompt: true) } }
+                .onChange(of: dailyPlanningTime) { Task { await DailyPlanning.sync(prompt: true) } }
+                .listRowBackground(Color(theme.surface))
+
+                Section {
+                    Toggle("Weekly review reminder", isOn: $weeklyReview)
+                    if weeklyReview {
+                        Picker("Day", selection: $weeklyReviewDay) {
+                            ForEach(weekdayOrder, id: \.self) { Text(Calendar.current.weekdaySymbols[$0 - 1]).tag($0) }
+                        }
+                        DatePicker("Time", selection: time($weeklyReviewTime), displayedComponents: .hourAndMinute)
+                    }
+                } header: {
+                    Text("Weekly review")
+                } footer: {
+                    Text("A notification each week that opens a review of the past 7 days and lets you plan the next.")
+                }
+                .onChange(of: weeklyReview) { Task { await WeeklyReview.sync(prompt: true) } }
+                .onChange(of: weeklyReviewDay) { Task { await WeeklyReview.sync(prompt: true) } }
+                .onChange(of: weeklyReviewTime) { Task { await WeeklyReview.sync(prompt: true) } }
+                .listRowBackground(Color(theme.surface))
+
+                Section("On-device AI") {
+                    Text(OnDeviceAI.unavailableReason ?? "Available").foregroundStyle(.secondary)
+                }
+                .listRowBackground(Color(theme.surface))
+
                 #if os(iOS)
-                NavigationLink("Calendars") { CalendarSettingsView() }
-                #else
-                // Mac detail column has no NavigationStack to push onto.
-                Button("Calendars…") { showingCalendarSettings = true }
-                    .sheet(isPresented: $showingCalendarSettings) { CalendarSettingsSheet() }
+                // ponytail: spike row, replaced by Finance import later
+                Section("Spike: shared inbox") {
+                    let inbox = SharedInbox.files
+                    LabeledContent("Files", value: "\(inbox.count)")
+                    Text(inbox.first?.lastPathComponent ?? "Empty").foregroundStyle(.secondary)
+                }
+                .listRowBackground(Color(theme.surface))
                 #endif
-            }
-            .listRowBackground(Color(theme.surface))
 
-            Section {
-                Picker("Travel by", selection: $travelTransport) {
-                    ForEach(TravelTime.Transport.allCases, id: \.self) { Text($0.title) }
-                }
-                Stepper("Leave \(travelBuffer) min early", value: $travelBuffer, in: 0...120, step: 5)
-            } header: {
-                Text("Leave-now alerts")
-            } footer: {
-                Text("Travel time is refreshed when the app opens and when iOS runs background refresh, so it can be out of date.")
-            }
-            .onChange(of: travelTransport) { Task { await TravelTime.refresh(store: calendars, prompt: false) } }
-            .onChange(of: travelBuffer) { Task { await TravelTime.refresh(store: calendars, prompt: false) } }
-            .listRowBackground(Color(theme.surface))
-
-            Section {
-                DatePicker("Start", selection: time($workStart), displayedComponents: .hourAndMinute)
-                DatePicker("End", selection: time($workEnd), displayedComponents: .hourAndMinute)
-                HStack {
-                    ForEach(weekdayOrder, id: \.self) { day in
-                        Toggle(Calendar.current.veryShortWeekdaySymbols[day - 1], isOn: workday(day))
-                            .accessibilityLabel(Calendar.current.weekdaySymbols[day - 1])
-                            .frame(maxWidth: .infinity)
-                    }
-                }
-                .toggleStyle(.button)
-                .buttonStyle(.bordered)  // separate tap targets inside a Form row
-                if workEnd <= workStart {
-                    Text("End must be after start, so no slots will be suggested.").foregroundStyle(.red)
-                }
-            } header: {
-                Text("Working hours")
-            } footer: {
-                Text("Used to suggest free slots for tasks.")
-            }
-            .listRowBackground(Color(theme.surface))
-
-            Section {
-                Toggle("Plan your day reminder", isOn: $dailyPlanning)
-                if dailyPlanning {
-                    DatePicker("Time", selection: time($dailyPlanningTime), displayedComponents: .hourAndMinute)
-                }
-            } header: {
-                Text("Daily planning")
-            } footer: {
-                Text("A notification each day that opens a screen to pick today's tasks and schedule them.")
-            }
-            .onChange(of: dailyPlanning) { Task { await DailyPlanning.sync(prompt: true) } }
-            .onChange(of: dailyPlanningTime) { Task { await DailyPlanning.sync(prompt: true) } }
-            .listRowBackground(Color(theme.surface))
-
-            Section {
-                Toggle("Weekly review reminder", isOn: $weeklyReview)
-                if weeklyReview {
-                    Picker("Day", selection: $weeklyReviewDay) {
-                        ForEach(weekdayOrder, id: \.self) { Text(Calendar.current.weekdaySymbols[$0 - 1]).tag($0) }
-                    }
-                    DatePicker("Time", selection: time($weeklyReviewTime), displayedComponents: .hourAndMinute)
-                }
-            } header: {
-                Text("Weekly review")
-            } footer: {
-                Text("A notification each week that opens a review of the past 7 days and lets you plan the next.")
-            }
-            .onChange(of: weeklyReview) { Task { await WeeklyReview.sync(prompt: true) } }
-            .onChange(of: weeklyReviewDay) { Task { await WeeklyReview.sync(prompt: true) } }
-            .onChange(of: weeklyReviewTime) { Task { await WeeklyReview.sync(prompt: true) } }
-            .listRowBackground(Color(theme.surface))
-
-            Section("On-device AI") {
-                Text(OnDeviceAI.unavailableReason ?? "Available").foregroundStyle(.secondary)
-            }
-            .listRowBackground(Color(theme.surface))
-
-            #if os(iOS)
-            // ponytail: spike row, replaced by Finance import later
-            Section("Spike: shared inbox") {
-                let inbox = SharedInbox.files
-                LabeledContent("Files", value: "\(inbox.count)")
-                Text(inbox.first?.lastPathComponent ?? "Empty").foregroundStyle(.secondary)
-            }
-            .listRowBackground(Color(theme.surface))
-            #endif
-
-            Section {
-                Button("Export backup…") {
-                    do {
-                        exportDocument = BackupDocument(data: try BackupService.export(
-                            context: modelContext, files: AttachmentFileStore(), defaults: .standard))
-                    } catch {
-                        backupError = error.localizedDescription
-                    }
-                }
-                Button("Restore from backup…") { isImporting = true }
-                Toggle("Weekly automatic backup", isOn: $autoBackupEnabled)
-                Button("Choose folder…") { isPickingFolder = true }
-                    .fileImporter(isPresented: $isPickingFolder, allowedContentTypes: [.folder]) { result in
+                Section {
+                    Button("Export backup…") {
                         do {
-                            let url = try result.get()
-                            let accessing = url.startAccessingSecurityScopedResource()
-                            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-                            try AutoBackup.setFolder(url)
-                            autoBackupFolder = url.lastPathComponent
-                            AutoBackup.run(context: modelContext)
+                            exportDocument = BackupDocument(data: try BackupService.export(
+                                context: modelContext, files: AttachmentFileStore(), defaults: .standard))
                         } catch {
                             backupError = error.localizedDescription
                         }
                     }
-                Text(autoBackupFolder.map { "Folder: \($0)" } ?? "No folder chosen.")
-                    .foregroundStyle(.secondary)
-                Stepper("Keep last \(autoBackupKeep)", value: $autoBackupKeep, in: 1...20)
-                if let autoBackupLast {
-                    Text("Last automatic backup: \(autoBackupLast.formatted())").foregroundStyle(.secondary)
+                    Button("Restore from backup…") { isImporting = true }
+                    Toggle("Weekly automatic backup", isOn: $autoBackupEnabled)
+                    Button("Choose folder…") { isPickingFolder = true }
+                        .fileImporter(isPresented: $isPickingFolder, allowedContentTypes: [.folder]) { result in
+                            do {
+                                let url = try result.get()
+                                let accessing = url.startAccessingSecurityScopedResource()
+                                defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+                                try AutoBackup.setFolder(url)
+                                autoBackupFolder = url.lastPathComponent
+                                AutoBackup.run(context: modelContext)
+                            } catch {
+                                backupError = error.localizedDescription
+                            }
+                        }
+                    Text(autoBackupFolder.map { "Folder: \($0)" } ?? "No folder chosen.")
+                        .foregroundStyle(.secondary)
+                    Stepper("Keep last \(autoBackupKeep)", value: $autoBackupKeep, in: 1...20)
+                    if let autoBackupLast {
+                        Text("Last automatic backup: \(autoBackupLast.formatted())").foregroundStyle(.secondary)
+                    }
+                    if let autoBackupError {
+                        Text(autoBackupError).foregroundStyle(.red)
+                    }
+                } header: {
+                    Text("Backup")
+                } footer: {
+                    Text("API keys are not included.")
                 }
-                if let autoBackupError {
-                    Text(autoBackupError).foregroundStyle(.red)
-                }
-            } header: {
-                Text("Backup")
-            } footer: {
-                Text("API keys are not included.")
-            }
-            .listRowBackground(Color(theme.surface))
+                .listRowBackground(Color(theme.surface))
 
-            #if os(iOS)
-            Section("Appearance") {
-                NavigationLink("App icon") { AppIconPicker() }
-            }
-            .listRowBackground(Color(theme.surface))
-            #endif
+                #if os(iOS)
+                Section("Appearance") {
+                    NavigationLink("App icon") { AppIconPicker() }
+                }
+                .listRowBackground(Color(theme.surface))
+                #endif
 
-            Section("Theme") {
-                Picker("Variant", selection: $editingDark) {
-                    Text("Light").tag(false)
-                    Text("Dark").tag(true)
+                Section("Theme") {
+                    Picker("Variant", selection: $editingDark) {
+                        Text("Light").tag(false)
+                        Text("Dark").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    colorPicker("Accent", \.accent)
+                    colorPicker("Background", \.background)
+                    colorPicker("Surface", \.surface)
+                    colorPicker("Text", \.text)
+                    ForEach(editingVariant.contrastWarnings, id: \.pair) { warning in
+                        Label(
+                            "\(warning.pair) contrast is \(warning.ratio, format: .number.precision(.fractionLength(1))):1",
+                            systemImage: "exclamationmark.triangle"
+                        )
+                        .foregroundStyle(.orange)
+                    }
                 }
-                .pickerStyle(.segmented)
-                colorPicker("Accent", \.accent)
-                colorPicker("Background", \.background)
-                colorPicker("Surface", \.surface)
-                colorPicker("Text", \.text)
-                ForEach(editingVariant.contrastWarnings, id: \.pair) { warning in
-                    Label(
-                        "\(warning.pair) contrast is \(warning.ratio, format: .number.precision(.fractionLength(1))):1",
-                        systemImage: "exclamationmark.triangle"
-                    )
-                    .foregroundStyle(.orange)
-                }
-            }
-            .listRowBackground(Color(theme.surface))
+                .listRowBackground(Color(theme.surface))
 
-            Section("Modules") {
-                ForEach(Destination.allCases.filter { $0 != .settings }) { destination in
-                    colorPicker(destination.title, \.[module: destination])
+                Section("Modules") {
+                    ForEach(Destination.allCases.filter { $0 != .settings }) { destination in
+                        colorPicker(destination.title, \.[module: destination])
+                    }
                 }
-            }
-            .listRowBackground(Color(theme.surface))
+                .listRowBackground(Color(theme.surface))
 
-            Section("Presets") {
-                ForEach(Palette.presets, id: \.name) { preset in
-                    Button(preset.name) { store.palette = preset.palette }
+                Section("Presets") {
+                    ForEach(Palette.presets, id: \.name) { preset in
+                        Button(preset.name) { store.palette = preset.palette }
+                    }
+                    Button("Reset to default", role: .destructive) { store.reset() }
                 }
-                Button("Reset to default", role: .destructive) { store.reset() }
+                .listRowBackground(Color(theme.surface))
             }
-            .listRowBackground(Color(theme.surface))
+            .onAppear {
+                stockStatus = StockQuotes.load()
+                #if DEBUG
+                // Screenshot hook: `-miseSettings stocks` scrolls to Stock Prices, once per launch.
+                if !debugScrolled && UserDefaults.standard.string(forKey: "miseSettings") == "stocks" {
+                    debugScrolled = true
+                    proxy.scrollTo("stocks", anchor: .top)
+                }
+                #endif
+            }
         }
         .navigationTitle("Settings")
         .themedBackground()

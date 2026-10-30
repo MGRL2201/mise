@@ -13,7 +13,7 @@ struct Backup: Codable {
                                 "planning.daily", "planning.dailyTime",
                                 "planning.weekly", "planning.weeklyDay", "planning.weeklyTime", "wake.phrase",
                                 "finance.homeCurrency", "finance.merchantRules", "finance.cardAccounts", "finance.applePayDefault",
-                                "finance.monthEnd", "finance.monthEndTime", "finance.csvMappings"]
+                                "finance.monthEnd", "finance.monthEndTime", "finance.csvMappings", "finance.stockProvider"]
 
     var version: Int
     var createdAt: Date
