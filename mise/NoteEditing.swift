@@ -1,93 +1,8 @@
-#if DEBUG
 import SwiftUI
 
-/// Spike #51 live prototype. Launch with `-miseSpike notes` (sample note) or `-miseSpike probe` (rendering probe).
-/// `-miseSpikeType YES` scripts typing + formatting; `-miseSpikeSource YES` then shows the raw Markdown.
-struct NoteEditorSpike: View {
-    @State private var text = UserDefaults.standard.string(forKey: "miseSpike") == "probe"
-        ? NoteEditorSpike.seed
-        : NoteMarkdown.attributed("# Groceries\nNeed **milk** and *eggs* before `9am`\n- apples\n- [ ] bread\n- [x] coffee\n## Ideas\nPlain paragraph to format")
-    @State private var selection = AttributedTextSelection()
-    @State private var source = false
-
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 8) {
-                HStack(spacing: 16) {
-                    Button { NoteSpike.toggle(.stronglyEmphasized, in: &text, selection: &selection) } label: { Image(systemName: "bold") }
-                    Button { NoteSpike.toggle(.emphasized, in: &text, selection: &selection) } label: { Image(systemName: "italic") }
-                    Button { NoteSpike.toggle(.code, in: &text, selection: &selection) } label: { Image(systemName: "chevron.left.forwardslash.chevron.right") }
-                    Button("H1") { NoteSpike.toggleHeading(1, in: &text, selection: &selection) }
-                    Button("H2") { NoteSpike.toggleHeading(2, in: &text, selection: &selection) }
-                    Button { NoteSpike.toggleBullet(in: &text, selection: &selection) } label: { Image(systemName: "list.bullet") }
-                    Button { NoteSpike.toggleCheckbox(in: &text, selection: &selection) } label: { Image(systemName: "checklist") }
-                    Toggle("Source", isOn: $source).toggleStyle(.button)
-                }
-                if source {
-                    ScrollView { Text(NoteMarkdown.markdown(text)).font(.body.monospaced()).frame(maxWidth: .infinity, alignment: .leading) }
-                } else {
-                    TextEditor(text: $text, selection: $selection)
-                }
-            }
-            .padding(.horizontal)
-            .navigationTitle("Notes spike")
-            .onChange(of: text) { old, _ in
-                NoteSpike.continueList(old: old, text: &text, selection: &selection)
-                NoteSpike.applyShortcuts(&text, selection: &selection)
-            }
-            .task {
-                if UserDefaults.standard.bool(forKey: "miseSpikeType") { await typeScript() }
-                source = UserDefaults.standard.bool(forKey: "miseSpikeSource")
-            }
-        }
-    }
-
-    /// Fakes keystrokes through the same onChange path, then exercises the formatting functions.
-    private func typeScript() async {
-        try? await Task.sleep(for: .milliseconds(500))
-        selection = AttributedTextSelection(insertionPoint: text.endIndex)
-        for ch in "\n# Typed heading\nbody\n- one\ntwo\n\n[ ] typed task\n" {
-            text.replaceSelection(&selection, withCharacters: String(ch))
-            try? await Task.sleep(for: .milliseconds(40))
-        }
-        if let r = text.range(of: "Plain") { selection = AttributedTextSelection(range: r) }
-        NoteSpike.toggle(.stronglyEmphasized, in: &text, selection: &selection)
-        if let r = text.range(of: "paragraph") { selection = AttributedTextSelection(range: r) }
-        NoteSpike.toggle(.emphasized, in: &text, selection: &selection)
-        if let r = text.range(of: "bread") { selection = AttributedTextSelection(insertionPoint: r.lowerBound) }
-        NoteSpike.toggleCheckbox(in: &text, selection: &selection)
-        selection = AttributedTextSelection(insertionPoint: text.endIndex)
-    }
-
-    static var seed: AttributedString {
-        func line(_ s: String, _ style: (inout AttributedString) -> Void = { _ in }) -> AttributedString {
-            var a = AttributedString(s)
-            style(&a)
-            return a + AttributedString("\n")
-        }
-        var s = try! AttributedString(markdown: "A: Markdown-parsed **bold** *italic* `code`")
-        s.append(AttributedString("\n"))
-        s += line("B: font bold") { $0.font = .body.bold() }
-        s += line("C: font italic") { $0.font = .body.italic() }
-        s += line("D: font bold+italic") { $0.font = .body.bold().italic() }
-        s += line("E: inlinePresentationIntent stronglyEmphasized") { $0.inlinePresentationIntent = .stronglyEmphasized }
-        s += line("F: inlinePresentationIntent emphasized") { $0.inlinePresentationIntent = .emphasized }
-        s += line("G: presentationIntent header 1") { $0.presentationIntent = PresentationIntent(.header(level: 1), identity: 1) }
-        s += line("H: font .title heading") { $0.font = .title.bold() }
-        s += line("I: strikethrough") { $0.strikethroughStyle = .single }
-        s += line("J: foregroundColor secondary") { $0.foregroundColor = .secondary }
-        s += try! AttributedString(markdown: "# K heading\n\n- K bullet\n- [ ] K task", options: .init(interpretedSyntax: .full))
-        s += AttributedString("\n")
-        s += line("☐ L: glyph checkbox")
-        s += line("☑ L: glyph checked")
-        s += line("• M: glyph bullet")
-        return s
-    }
-}
-
-/// Spike #51 editor logic. A paragraph is the text between "\n"s; headings are a fixed font on the
+/// #54 note editor logic. A paragraph is the text between "\n"s; headings are a fixed font on the
 /// paragraph, bold/italic/code are `inlinePresentationIntent`, lists are glyph prefixes.
-enum NoteSpike {
+enum NoteEditing {
     typealias Index = AttributedString.Index
     /// Typed Markdown prefix → editor prefix. Order matters: "- [ ] " becomes "• [ ] " then "☐ ".
     static let shortcuts: [(String, String)] = [
@@ -215,4 +130,3 @@ enum NoteSpike {
         selection = AttributedTextSelection(insertionPoint: i, typingAttributes: attrs)
     }
 }
-#endif
