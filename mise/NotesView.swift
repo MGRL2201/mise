@@ -40,7 +40,8 @@ struct NotesView: View {
     var body: some View {
         let folders = allFolders.filter { $0.parent === folder }
         let notes = Notes.sorted(allNotes.filter { $0.folder === folder })
-        Group {
+        // ZStack, not Group: Group pushes .onAppear onto each branch, so the empty-to-List flip would sweep a new note.
+        ZStack {
             if folders.isEmpty && notes.isEmpty {
                 ContentUnavailableView {
                     Label("No notes", systemImage: "note.text")
