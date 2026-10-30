@@ -43,7 +43,11 @@ struct MiseApp: App {
                     switch phase {
                     case .active:
                         AutoBackup.run(context: container.mainContext)
-                        Task { await CoinGecko.refresh(context: container.mainContext); await FX.refresh(context: container.mainContext) }
+                        Task {
+                            await CoinGecko.refresh(context: container.mainContext)
+                            await Stocks.refresh(context: container.mainContext)
+                            await FX.refresh(context: container.mainContext)
+                        }
                         Task { await TravelTime.refresh(store: calendar, prompt: true) }
                         Task { await DailyPlanning.sync(prompt: false) }
                         Task { await WeeklyReview.sync(prompt: false) }
@@ -58,6 +62,7 @@ struct MiseApp: App {
                     case .background:
                         AutoBackup.scheduleRefresh()
                         TravelTime.scheduleRefresh()
+                        Stocks.scheduleRefresh()
                     #endif
                     default: break
                     }
@@ -75,8 +80,23 @@ struct MiseApp: App {
             await TravelTime.refresh(store: calendar, prompt: false)
             await TravelTime.scheduleRefresh()
         }
+        .backgroundTask(.appRefresh(Stocks.taskID)) { [container] in
+            await Self.refreshPrices(container)
+        }
         #endif
     }
+
+    #if os(iOS)
+    /// Background stock refresh: crypto first (cheap; Alpha Vantage's 1.2 s spacing can eat the ~30 s budget),
+    /// then stocks, then FX (records the snapshot), then the next run.
+    @MainActor private static func refreshPrices(_ container: ModelContainer) async {
+        guard !Storage.inMemory else { return }
+        await CoinGecko.refresh(context: container.mainContext)
+        await Stocks.refresh(context: container.mainContext)
+        await FX.refresh(context: container.mainContext)
+        Stocks.scheduleRefresh()
+    }
+    #endif
 
     /// DEBUG `-miseSeedFinance YES`: in-memory sample data for screenshots; never touches the real store or backups.
     #if DEBUG

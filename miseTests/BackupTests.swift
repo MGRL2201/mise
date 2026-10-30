@@ -326,4 +326,14 @@ extension BackupTests {
         #expect(copy.id == snapshot.id && copy.date == snapshot.date)
         #expect(copy.total == Decimal(string: "1234.56") && copy.currency == "SGD")
     }
+
+    @Test func stockProviderRoundTrips() throws {
+        let source = try freshStore()
+        source.defaults.set(StockProvider.alphaVantage.rawValue, forKey: StockProvider.key)
+
+        let target = try freshStore()
+        try restore(try export(source), into: target)
+
+        #expect(StockProvider.current(target.defaults) == .alphaVantage)
+    }
 }

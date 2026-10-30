@@ -462,6 +462,7 @@ struct AccountDetailView: View {
     @State private var exportDocument: CSVDocument?
     @State private var exportError: String?
     @State private var refreshing = false
+    @State private var hasStockKey = true
     #if DEBUG
     @State private var debugOpened = false
     #endif
@@ -477,11 +478,12 @@ struct AccountDetailView: View {
         Task { await refreshPrices() }
     }
 
-    /// Crypto prices first (a newly linked coin), then FX, which records the snapshot.
+    /// Crypto and stock prices first (a newly linked coin or ticker), then FX, which records the snapshot.
     private func refreshPrices() async {
         guard !refreshing else { return }
         refreshing = true
         await CoinGecko.refresh(context: modelContext)
+        await Stocks.refresh(context: modelContext)
         await FX.refresh(context: modelContext)
         rates = .load()
         refreshing = false
@@ -562,7 +564,7 @@ struct AccountDetailView: View {
             .listRowBackground(Color(theme.surface))
             if showsHoldings {
                 Section("Holdings") {
-                    let linked = holdings.filter { $0.coinID != nil }
+                    let linked = holdings.filter { $0.coinID != nil || Stocks.symbol(of: $0) != nil }
                     if holdings.isEmpty {
                         Text("No holdings yet").foregroundStyle(.secondary)
                     } else {
@@ -572,6 +574,10 @@ struct AccountDetailView: View {
                         }
                         if let updated = linked.compactMap(\.priceDate).max() {
                             Text("Prices updated \(updated, format: .relative(presentation: .named))").foregroundStyle(.secondary)
+                        }
+                        if !hasStockKey && holdings.contains(where: { Stocks.symbol(of: $0) != nil }) {
+                            Text("Add an API key in Settings → Stock Prices to update stock prices automatically.")
+                                .foregroundStyle(.secondary)
                         }
                         if summary.unpriced > 0 {
                             Text("\(summary.unpriced) without price (not in totals)").foregroundStyle(.secondary)
@@ -609,6 +615,7 @@ struct AccountDetailView: View {
             }
         }
         .refreshable { await refreshPrices() }
+        .onAppear { hasStockKey = Keychain.get(Keychain.stockAPIKey) != nil }
         .navigationTitle(account.name)
     }
 
