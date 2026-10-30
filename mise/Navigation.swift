@@ -223,6 +223,12 @@ struct ContentView: View {
                 #else
                 FinanceView()
                 #endif
+            } else if destination == .notes {
+                #if os(macOS)
+                NavigationStack { NotesView() }
+                #else
+                NotesView()
+                #endif
             } else {
                 PlaceholderView(destination: destination)
             }

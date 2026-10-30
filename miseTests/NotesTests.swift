@@ -112,4 +112,18 @@ struct NotesTests {
         #expect(taskTag.notes?.first === note)
         #expect(try context.fetch(FetchDescriptor<mise.Tag>()).count == 1)
     }
+
+    @Test func pathsAreParentNamedAndSortedAndSurviveCycles() throws {
+        let context = context()
+        let work = folder("Work", in: context)
+        _ = folder("Projects", parent: work, in: context)
+        _ = folder("Personal", in: context)
+        let a = folder("A", in: context), b = folder("B", parent: a, in: context)
+        a.parent = b
+        try context.save()
+
+        let paths = Notes.paths(try context.fetch(FetchDescriptor<NoteFolder>())).map(\.path)
+        #expect(paths.filter { !$0.contains("A") && !$0.contains("B") } == ["Personal", "Work", "Work / Projects"])
+        #expect(paths.contains("B / A") && paths.contains("A / B"))
+    }
 }

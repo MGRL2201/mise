@@ -57,4 +57,45 @@ enum Notes {
         context.delete(folder)
         do { try context.save() } catch { context.rollback(); throw error }
     }
+
+    /// Every folder with its "Parent / Child" path, sorted by path (the Move list). Stops at a parent cycle.
+    static func paths(_ folders: [NoteFolder]) -> [(folder: NoteFolder, path: String)] {
+        folders.map { folder in
+            var names: [String] = [], seen: Set<UUID> = [], current: NoteFolder? = folder
+            while let next = current, seen.insert(next.id).inserted {
+                names.insert(next.name, at: 0)
+                current = next.parent
+            }
+            return (folder, names.joined(separator: " / "))
+        }
+        .sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+    }
 }
+
+#if DEBUG
+extension Notes {
+    /// Screenshot data for `-miseSeedFinance YES`; only ever inserted into an in-memory container.
+    static func seed(_ context: ModelContext) {
+        let work = NoteFolder(name: "Work"), projects = NoteFolder(name: "Projects"), personal = NoteFolder(name: "Personal")
+        [work, projects, personal].forEach(context.insert)
+        projects.parent = work
+        let tagWork = try? Tag.named("work", in: context), ideas = try? Tag.named("ideas", in: context)
+        let seeds: [(String, NoteFolder?, Bool, [Tag?], Double)] = [
+            ("# Shopping list\n- [ ] Milk\n- [ ] Eggs\n- [ ] Coffee beans", nil, true, [], 5),
+            ("# Standup notes\nShipped notes folders. Next: rich editor.", work, false, [tagWork], 1),
+            ("# mise roadmap\n- Notes editor\n- Wake tracker", projects, false, [tagWork, ideas], 2),
+            ("# Trip to Kyoto\nBook ryokan, JR pass.", personal, false, [], 3),
+            ("Gift ideas for Mum", nil, false, [ideas], 4),
+        ]
+        for (body, folder, pinned, tags, hoursAgo) in seeds {
+            let note = Note(body: body)
+            context.insert(note)
+            note.folder = folder
+            note.pinned = pinned
+            note.tags = tags.compactMap { $0 }
+            note.modified = .now.addingTimeInterval(-hoursAgo * 3600)
+        }
+        try? context.save()
+    }
+}
+#endif

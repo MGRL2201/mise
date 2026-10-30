@@ -335,7 +335,9 @@ enum BackupService {
                     context.insert(folder)
                     folders[record.id] = folder
                 }
-                for record in backup.noteFolders ?? [] { folders[record.id]?.parent = record.parentID.flatMap { folders[$0] } }
+                for record in backup.noteFolders ?? [] where record.parentID != record.id {
+                    folders[record.id]?.parent = record.parentID.flatMap { folders[$0] }
+                }
                 for record in noteRecords {
                     let note = Note(body: record.body)
                     note.id = record.id
@@ -344,6 +346,7 @@ enum BackupService {
                     note.pinned = record.pinned
                     context.insert(note)
                     note.folder = record.folderID.flatMap { folders[$0] }
+                    // ponytail: one Tag fetch per tag, fine for hundreds of notes; build a name→Tag map if restore gets slow.
                     note.tags = try record.tagNames.compactMap { try Tag.named($0, in: context) }
                 }
             }
