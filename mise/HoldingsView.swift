@@ -84,7 +84,7 @@ struct HoldingEditor: View {
                         #endif
                         .onChange(of: price) { priceDate = .now }
                     if hasPrice {
-                        DatePicker("Price date", selection: $priceDate, displayedComponents: .date)
+                        DatePicker("Price date", selection: $priceDate, in: ...Date.now, displayedComponents: .date)
                     }
                     CurrencyPicker(title: "Currency", selection: $currency)
                 } footer: {
@@ -101,6 +101,22 @@ struct HoldingEditor: View {
                             .autocorrectionDisabled()
                             .textInputAutocapitalization(.never)
                             #endif
+                            .task(id: query) {
+                                try? await Task.sleep(for: .milliseconds(400))
+                                guard !Task.isCancelled else { return }
+                                let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+                                guard !trimmed.isEmpty else { results = []; searchError = nil; return }
+                                do {
+                                    let found = try await CoinGecko.search(trimmed)
+                                    guard !Task.isCancelled else { return }
+                                    results = found
+                                    searchError = nil
+                                } catch {
+                                    guard !Task.isCancelled else { return }
+                                    results = []
+                                    searchError = "Search unavailable"
+                                }
+                            }
                         if let searchError { Text(searchError).foregroundStyle(.secondary) }
                         ForEach(results) { coin in
                             Button {
@@ -117,22 +133,6 @@ struct HoldingEditor: View {
                         Text("CoinGecko")
                     } footer: {
                         Text("Linked coins get their price from CoinGecko on refresh, overwriting manual prices.")
-                    }
-                    .task(id: query) {
-                        try? await Task.sleep(for: .milliseconds(400))
-                        guard !Task.isCancelled else { return }
-                        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard !trimmed.isEmpty else { results = []; searchError = nil; return }
-                        do {
-                            let found = try await CoinGecko.search(trimmed)
-                            guard !Task.isCancelled else { return }
-                            results = found
-                            searchError = nil
-                        } catch {
-                            guard !Task.isCancelled else { return }
-                            results = []
-                            searchError = "Search unavailable offline"
-                        }
                     }
                 }
                 if let holding = live {
@@ -205,7 +205,7 @@ struct PriceEditor: View {
                         #if os(iOS)
                         .keyboardType(.numbersAndPunctuation)
                         #endif
-                    DatePicker("Date", selection: $date, displayedComponents: .date)
+                    DatePicker("Date", selection: $date, in: ...Date.now, displayedComponents: .date)
                 } footer: {
                     Text("Per unit, in \(holding.currency).")
                 }

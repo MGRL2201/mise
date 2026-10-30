@@ -75,7 +75,7 @@ extension Accounts {
         let holdings: [(String, String, HoldingKind, String, Decimal, String, String?, Double)] = [
             ("VOO", "Vanguard S&P 500 ETF", .stock, "15", 6200, "USD", "552.10", 1),
             ("AAPL", "Apple", .stock, "20", 3400, "USD", "231.40", 1),
-            ("BTC", "Bitcoin", .crypto, "0.25", 9000, "USD", "68250", 0),
+            ("BTC", "Bitcoin", .crypto, "0.25", 9000, "USD", "68250", 1),
             ("Endowus Core", "Endowus Core Portfolio", .fund, "1", 15000, "SGD", "18420.55", 20),
             ("NVDA", "NVIDIA", .stock, "5", 600, "USD", nil, 0),
         ]

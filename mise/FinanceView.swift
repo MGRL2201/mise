@@ -476,6 +476,7 @@ struct AccountDetailView: View {
 
     /// Crypto prices first (a newly linked coin), then FX, which records the snapshot.
     private func refreshPrices() async {
+        guard !refreshing else { return }
         refreshing = true
         await CoinGecko.refresh(context: modelContext)
         await FX.refresh(context: modelContext)
