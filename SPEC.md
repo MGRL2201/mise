@@ -640,7 +640,9 @@ To be filled in as capability spikes (Phase 1, Phase 9) complete.
   functions), `miseTests/NoteEditorSpikeTests.swift` (8 tests). Launch args:
   `-miseSpike notes` (sample note, formatting bar), `-miseSpike probe`
   (rendering probe), `-miseSpikeType YES` (scripted typing),
-  `-miseSpikeSource YES` (raw Markdown view).
+  `-miseSpikeSource YES` (raw Markdown view). #54 promoted the pure functions
+  to `mise/NoteEditing.swift` (`enum NoteEditing`) and deleted the spike view,
+  tests and `-miseSpike` args.
 - **API:** `TextEditor(text: Binding<AttributedString>, selection:
   Binding<AttributedTextSelection>)` works on iOS and macOS. Used:
   `AttributedTextSelection` (`indices(in:)` → `.insertionPoint` /

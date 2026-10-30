@@ -32,11 +32,7 @@ struct MiseApp: App {
 
     var body: some Scene {
         WindowGroup {
-            #if DEBUG
-            if ["notes", "probe"].contains(UserDefaults.standard.string(forKey: "miseSpike")) { NoteEditorSpike() } else { root }  // spike #51
-            #else
             root
-            #endif
         }
         .modelContainer(container)
         #if os(iOS)
