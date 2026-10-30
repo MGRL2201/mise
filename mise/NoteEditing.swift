@@ -32,10 +32,8 @@ enum NoteEditing {
 
     /// Heading `level` on the paragraph(s) at the selection, or body text if they already are that level.
     static func toggleHeading(_ level: Int, in text: inout AttributedString, selection: inout AttributedTextSelection) {
-        var (lower, upper) = bounds(text, selection)
-        // A triple-click selection ends after the "\n"; don't spill into the next paragraph.
-        if lower < upper, text.characters[text.characters.index(before: upper)] == "\n" { upper = text.characters.index(before: upper) }
-        let start = paragraphStart(text, lower), end = paragraphEnd(text, upper)
+        let starts = paragraphStarts(text, selection)
+        let start = starts.first!, end = paragraphEnd(text, starts.last!)
         let current = start < end ? text[start..<end].runs.first?.font : selection.typingAttributes(in: text).font
         let font: Font? = NoteMarkdown.headingLevel(current) == level ? nil : NoteMarkdown.headingFont(level)
         text.transform(updating: &selection) { $0[start..<end].font = font }
@@ -43,19 +41,45 @@ enum NoteEditing {
     }
 
     static func toggleBullet(in text: inout AttributedString, selection: inout AttributedTextSelection) {
-        let start = paragraphStart(text, bounds(text, selection).lower)
-        let old = NoteMarkdown.prefix(text, at: start)
-        replace(old ?? "", with: old == NoteMarkdown.bullet ? "" : NoteMarkdown.bullet, at: start, in: &text, selection: &selection)
+        relead(&text, &selection) { _, l, first in l.quotes + (first.glyph != NoteMarkdown.bullet ? NoteMarkdown.bullet : l.glyph == NoteMarkdown.bullet ? "" : l.glyph) }
     }
 
     static func toggleCheckbox(in text: inout AttributedString, selection: inout AttributedTextSelection) {
-        let start = paragraphStart(text, bounds(text, selection).lower)
-        let old = NoteMarkdown.prefix(text, at: start)
-        replace(old ?? "", with: old == NoteMarkdown.openTask ? NoteMarkdown.doneTask : NoteMarkdown.openTask, at: start, in: &text, selection: &selection)
+        relead(&text, &selection) { _, l, first in l.quotes + (first.glyph == NoteMarkdown.openTask ? NoteMarkdown.doneTask : NoteMarkdown.openTask) }
+    }
+
+    /// "N. " on/off; numbering continues a numbered previous paragraph with the same quotes/indent.
+    static func toggleNumbered(in text: inout AttributedString, selection: inout AttributedTextSelection) {
+        let start = paragraphStarts(text, selection)[0]
+        var base = 1
+        if start > text.startIndex {
+            let prev = lead(text, at: paragraphStart(text, text.characters.index(before: start)))
+            if prev.quotes == lead(text, at: start).quotes, let n = number(prev.glyph) { base = n + 1 }
+        }
+        relead(&text, &selection) { k, l, first in
+            l.quotes + (number(first.glyph) == nil ? "\(base + k). " : number(l.glyph) == nil ? l.glyph : "")
+        }
+    }
+
+    /// Adds a quote level after the indent, or removes one.
+    static func toggleQuote(in text: inout AttributedString, selection: inout AttributedTextSelection) {
+        relead(&text, &selection) { _, l, first in
+            let indent = String(l.quotes.prefix { $0 == " " || $0 == "\t" }), quotes = l.quotes.dropFirst(indent.count)
+            return indent + (first.quotes.contains(NoteMarkdown.quote) ? String(quotes.dropFirst(NoteMarkdown.quote.count)) : NoteMarkdown.quote + quotes) + l.glyph
+        }
+    }
+
+    /// Saves `text` as the note's body unless its Markdown equals `baseline` (the canonical form of what was loaded).
+    static func commit(_ text: AttributedString, to note: Note, baseline: inout String, now: Date = .now) {
+        let md = NoteMarkdown.markdown(text)
+        guard md != baseline else { return }
+        baseline = md
+        note.body = md
+        note.modified = now
     }
 
     /// Turns typed Markdown line prefixes ("# ", "- ", "> ", "[ ] "...) into the editor representation, and a typed
-    /// ``` into a code line, in the paragraphs the edit from `old` touched. Idempotent.
+    /// ``` or a line inside a fence into a code line, in the paragraphs the edit from `old` touched. Idempotent.
     static func applyShortcuts(old: AttributedString, text: inout AttributedString, selection: inout AttributedTextSelection) {
         guard !old.characters.elementsEqual(text.characters) else { return }  // attribute-only change
         let common = zip(old.characters, text.characters).prefix { $0 == $1 }.count
@@ -72,9 +96,9 @@ enum NoteEditing {
         while true {  // offset = character offset of the paragraph start; indices go stale after each edit
             let start = text.characters.index(text.startIndex, offsetBy: offset)
             let body = text.characters[start...].drop { $0 == " " || $0 == "\t" }.startIndex
-            if isCode(text, body) || inFence(text, before: start) {
+            if isCode(text, body) {
                 // Code line: no shortcuts.
-            } else if text.characters[body...].starts(with: "```"), edited(body, 3) {
+            } else if inFence(text, before: start) || (text.characters[body...].starts(with: "```") && edited(body, 3)) {
                 let end = paragraphEnd(text, start)
                 text.transform(updating: &selection) { $0[start..<end].inlinePresentationIntent = .code }
                 setTyping(in: text, selection: &selection, onlyIfIn: offset) { $0.inlinePresentationIntent = flipped($0.inlinePresentationIntent, .code, on: true) }
@@ -119,8 +143,11 @@ enum NoteEditing {
             if text.characters.distance(from: start, to: newline) == quotes.count + glyph.count, paragraphEnd(text, cursor) == cursor {
                 text.transform(updating: &selection) { $0.removeSubrange(start..<cursor) }
             } else {
-                let next = glyph == NoteMarkdown.doneTask ? NoteMarkdown.openTask : Int(glyph.dropLast(2)).map { "\($0 + 1). " } ?? glyph
-                text.transform(updating: &selection) { $0.insert(AttributedString(quotes + next), at: cursor) }
+                let next = glyph == NoteMarkdown.doneTask ? NoteMarkdown.openTask : number(glyph).map { "\($0 + 1). " } ?? glyph
+                // Mid-heading split: the new lead takes the tail's heading font.
+                var attrs = AttributeContainer()
+                if cursor < paragraphEnd(text, cursor) { attrs.font = text[cursor...].runs.first?.font }
+                text.transform(updating: &selection) { $0.insert(AttributedString(quotes + next, attributes: attrs), at: cursor) }
             }
         }
         if afterHeading { setTyping(in: text, selection: &selection) { $0.font = nil } }
@@ -135,6 +162,31 @@ enum NoteEditing {
     static func paragraphEnd(_ text: AttributedString, _ i: Index) -> Index {
         text.characters[i...].firstIndex(of: "\n") ?? text.endIndex
     }
+
+    /// Starts of the paragraphs the selection touches. A triple-click selection ends after the "\n"; it doesn't
+    /// spill into the next paragraph.
+    private static func paragraphStarts(_ text: AttributedString, _ selection: AttributedTextSelection) -> [Index] {
+        var (lower, upper) = bounds(text, selection)
+        if lower < upper, text.characters[text.characters.index(before: upper)] == "\n" { upper = text.characters.index(before: upper) }
+        var starts = [paragraphStart(text, lower)]
+        while let newline = text.characters[starts.last!..<upper].firstIndex(of: "\n") { starts.append(text.characters.index(after: newline)) }
+        return starts
+    }
+
+    /// Replaces the lead of every paragraph the selection touches with `change(k, lead, firstLead)`; the first
+    /// paragraph decides on/off. Works last to first so earlier offsets stay valid.
+    private static func relead(_ text: inout AttributedString, _ selection: inout AttributedTextSelection,
+                               _ change: (Int, (quotes: String, glyph: String), (quotes: String, glyph: String)) -> String) {
+        let offsets = paragraphStarts(text, selection).map { text.characters.distance(from: text.startIndex, to: $0) }
+        let first = lead(text, at: text.characters.index(text.startIndex, offsetBy: offsets[0]))
+        for (k, offset) in offsets.enumerated().reversed() {
+            let start = text.characters.index(text.startIndex, offsetBy: offset)
+            let l = lead(text, at: start), new = change(k, l, first)
+            if new != l.quotes + l.glyph { replace(l.quotes + l.glyph, with: new, at: start, in: &text, selection: &selection) }
+        }
+    }
+
+    private static func number(_ glyph: String) -> Int? { Int(glyph.dropLast(2)) }
 
     /// A paragraph's lead: indent plus quote glyphs (`quotes`), then a list glyph or "N. " (`glyph`, else "").
     static func lead(_ text: AttributedString, at start: Index) -> (quotes: String, glyph: String) {

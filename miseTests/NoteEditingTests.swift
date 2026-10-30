@@ -252,4 +252,105 @@ struct NoteEditingTests {
             #expect(t == first)
         }
     }
+
+    typealias Edit = (inout AttributedString, inout AttributedTextSelection) -> Void
+
+    /// Markdown of `s` after `edits`, with everything selected or (`cursor`) an insertion point at the end.
+    private func apply(_ edits: [Edit], to s: String = "x", cursor: Bool = false) -> String {
+        var t = AttributedString(s)
+        var sel = cursor ? atEnd(t) : AttributedTextSelection(range: t.startIndex..<t.endIndex)
+        for edit in edits { edit(&t, &sel) }
+        return NoteMarkdown.markdown(t)
+    }
+
+    @Test func toggleRoundTrips() {
+        let bold: Edit = { NoteEditing.toggle(.stronglyEmphasized, in: &$0, selection: &$1) }
+        let italic: Edit = { NoteEditing.toggle(.emphasized, in: &$0, selection: &$1) }
+        let strike: Edit = { NoteEditing.toggle(.strikethrough, in: &$0, selection: &$1) }
+        let code: Edit = { NoteEditing.toggle(.code, in: &$0, selection: &$1) }
+        let heading: Edit = { NoteEditing.toggleHeading(1, in: &$0, selection: &$1) }
+        let bullet: Edit = { NoteEditing.toggleBullet(in: &$0, selection: &$1) }
+        let numbered: Edit = { NoteEditing.toggleNumbered(in: &$0, selection: &$1) }
+        let checkbox: Edit = { NoteEditing.toggleCheckbox(in: &$0, selection: &$1) }
+        let quote: Edit = { NoteEditing.toggleQuote(in: &$0, selection: &$1) }
+        for (edit, md) in [(bold, "**x**"), (italic, "*x*"), (strike, "~~x~~"), (code, "`x`")] {
+            #expect(apply([edit]) == md)
+            #expect(apply([edit, edit]) == "x")
+        }
+        for (edit, md) in [(heading, "# x"), (bullet, "- x"), (numbered, "1. x"), (quote, "> x")] {
+            for cursor in [false, true] {
+                #expect(apply([edit], cursor: cursor) == md)
+                #expect(apply([edit, edit], cursor: cursor) == "x")
+            }
+        }
+        for cursor in [false, true] {
+            #expect(apply([checkbox], cursor: cursor) == "- [ ] x")
+            #expect(apply([checkbox, checkbox], cursor: cursor) == "- [x] x")
+            #expect(apply([quote, bullet], cursor: cursor) == "> - x")
+        }
+        #expect(apply([bullet, numbered]) == "1. x")
+        #expect(apply([numbered, checkbox]) == "- [ ] x")
+    }
+
+    @Test func multiParagraph() {
+        #expect(apply([{ NoteEditing.toggleNumbered(in: &$0, selection: &$1) }], to: "a\nb\nc") == "1. a\n2. b\n3. c")
+        #expect(apply([{ NoteEditing.toggleBullet(in: &$0, selection: &$1) }], to: "a\nb") == "- a\n- b")
+        #expect(apply([{ NoteEditing.toggleQuote(in: &$0, selection: &$1) }], to: "a\nb") == "> a\n> b")
+        #expect(apply([{ NoteEditing.toggleCheckbox(in: &$0, selection: &$1) }], to: "a\nb") == "- [ ] a\n- [ ] b")
+        #expect(apply([{ NoteEditing.toggleNumbered(in: &$0, selection: &$1) }], to: "1. a\nb", cursor: true) == "1. a\n2. b")
+        // A selection ending right after a "\n" leaves the next paragraph alone.
+        var t = AttributedString("a\nb")
+        var sel = AttributedTextSelection(range: t.startIndex..<t.characters.index(t.startIndex, offsetBy: 2))
+        NoteEditing.toggleBullet(in: &t, selection: &sel)
+        #expect(NoteMarkdown.markdown(t) == "- a\nb")
+    }
+
+    @Test func listGlyphKeepsHeadingFontOnly() {
+        var t = styled("x", .stronglyEmphasized)
+        t.font = NoteMarkdown.headingFont(2)
+        var sel = atEnd(t)
+        NoteEditing.toggleQuote(in: &t, selection: &sel)
+        NoteEditing.toggleBullet(in: &t, selection: &sel)
+        #expect(NoteMarkdown.markdown(t) == "> ## - **x**")
+    }
+
+    @Test func openingDoesNotChangeNote() {
+        let note = Note(body: "* item\n__b__\n\\# lit")
+        let past = Date(timeIntervalSince1970: 1_000_000)
+        note.modified = past
+        var baseline = NoteMarkdown.markdown(NoteMarkdown.attributed(note.body))
+        var text = NoteMarkdown.attributed(note.body)
+        NoteEditing.commit(text, to: note, baseline: &baseline)
+        #expect(note.body == "* item\n__b__\n\\# lit")
+        #expect(note.modified == past)
+        text.append(AttributedString("!"))
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        NoteEditing.commit(text, to: note, baseline: &baseline, now: now)
+        #expect(note.body == NoteMarkdown.markdown(text))
+        #expect(baseline == note.body)
+        #expect(note.modified == now)
+    }
+
+    @Test func pastedFenceIsCode() {
+        var pasted = AttributedString("```\n1. a\n```")
+        var sel = atEnd(pasted)
+        NoteEditing.applyShortcuts(old: AttributedString(), text: &pasted, selection: &sel)
+        #expect(pasted.runs.filter { $0.inlinePresentationIntent?.contains(.code) != true }.allSatisfy { String(pasted.characters[$0.range]) == "\n" })
+        let line = AttributedString(pasted[..<pasted.characters.index(pasted.startIndex, offsetBy: 8)])
+        let (t, sel2) = typeReturn(line)
+        #expect(String(t.characters) == "```\n1. a\n")
+        #expect(sel2.typingAttributes(in: t).inlinePresentationIntent?.contains(.code) == true)
+    }
+
+    @Test func midQuotedHeadingReturnKeepsHeading() {
+        var old = AttributedString("▍ Title")
+        old.font = NoteMarkdown.headingFont(1)
+        var t = old
+        t.insert(AttributedString("\n", attributes: AttributeContainer().font(NoteMarkdown.headingFont(1))), at: t.characters.index(t.startIndex, offsetBy: 4))
+        var sel = AttributedTextSelection(insertionPoint: t.characters.index(t.startIndex, offsetBy: 5),
+                                          typingAttributes: AttributeContainer().font(NoteMarkdown.headingFont(1)))
+        NoteEditing.continueList(old: old, text: &t, selection: &sel)
+        #expect(String(t.characters) == "▍ Ti\n▍ tle")
+        #expect(NoteMarkdown.markdown(t) == "> # Ti\n> # tle")
+    }
 }
