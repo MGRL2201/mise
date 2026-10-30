@@ -87,11 +87,12 @@ struct MiseApp: App {
     }
 
     #if os(iOS)
-    /// Background stock refresh: stocks and crypto, then FX (records the snapshot), then the next run.
+    /// Background stock refresh: crypto first (cheap; Alpha Vantage's 1.2 s spacing can eat the ~30 s budget),
+    /// then stocks, then FX (records the snapshot), then the next run.
     @MainActor private static func refreshPrices(_ container: ModelContainer) async {
         guard !Storage.inMemory else { return }
-        await Stocks.refresh(context: container.mainContext)
         await CoinGecko.refresh(context: container.mainContext)
+        await Stocks.refresh(context: container.mainContext)
         await FX.refresh(context: container.mainContext)
         Stocks.scheduleRefresh()
     }

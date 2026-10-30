@@ -118,11 +118,11 @@ struct SettingsView: View {
                         Text("Couldn't save key (OSStatus \(stockAPIKeyError))")
                             .foregroundStyle(.red)
                     }
-                    if let fetchedAt = stockStatus.fetchedAt {
+                    if stockAPIKeySaved, let fetchedAt = stockStatus.fetchedAt {
                         Text("Last updated \(fetchedAt, format: .relative(presentation: .named))")
                             .foregroundStyle(.secondary)
                     }
-                    if let lastError = stockStatus.lastError {
+                    if stockAPIKeySaved, let lastError = stockStatus.lastError {
                         Text(lastError).foregroundStyle(.red)
                     }
                     HStack {
@@ -132,11 +132,7 @@ struct SettingsView: View {
                                 stockAPIKeyInput = ""
                                 stockAPIKeySaved = true
                                 stockAPIKeyError = nil
-                                Task {
-                                    await Stocks.refresh(context: modelContext)
-                                    await FX.refresh(context: modelContext)
-                                    stockStatus = StockQuotes.load()
-                                }
+                                refreshStocks()
                             } catch let error as Keychain.Error {
                                 stockAPIKeyError = error.status
                             } catch {
@@ -165,6 +161,7 @@ struct SettingsView: View {
                     Text("Prices are taken as the holding's currency; use the provider's ticker, e.g. AAPL or D05.SI. Finnhub allows 60 calls a minute; Alpha Vantage 25 a day, so prices refresh a few times a day. The key stays in this device's Keychain and is not included in backups.")
                 }
                 .id("stocks")
+                .onChange(of: stockProvider) { if stockAPIKeySaved { refreshStocks() } }
                 .listRowBackground(Color(theme.surface))
 
                 Section("Calendar") {
@@ -349,7 +346,7 @@ struct SettingsView: View {
                 // Screenshot hook: `-miseSettings stocks` scrolls to Stock Prices, once per launch.
                 if !debugScrolled && UserDefaults.standard.string(forKey: "miseSettings") == "stocks" {
                     debugScrolled = true
-                    proxy.scrollTo("stocks", anchor: .top)
+                    DispatchQueue.main.async { proxy.scrollTo("stocks", anchor: .top) }
                 }
                 #endif
             }
@@ -382,6 +379,15 @@ struct SettingsView: View {
             isPresented: Binding { backupError != nil } set: { if !$0 { backupError = nil } }
         ) {} message: {
             Text(backupError ?? "")
+        }
+    }
+
+    /// Stocks, then FX (records the snapshot), then reload the status lines.
+    private func refreshStocks() {
+        Task {
+            await Stocks.refresh(context: modelContext)
+            await FX.refresh(context: modelContext)
+            stockStatus = StockQuotes.load()
         }
     }
 
