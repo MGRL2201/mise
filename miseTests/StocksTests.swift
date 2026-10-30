@@ -17,7 +17,7 @@ struct StocksTests {
     }
 
     func parse(_ provider: StockProvider, _ json: String, status: Int = 200) throws -> StockQuotes.Quote? {
-        try provider.parse(Data(json.utf8), status: status, now: now)
+        try provider.parse(Data(json.utf8), status: status, now: now, key: "test-key-123")
     }
 
     func stopMessage(_ provider: StockProvider, _ json: String, status: Int = 200) -> String? {
@@ -70,8 +70,13 @@ struct StocksTests {
 
     @Test func alphaVantageNoteStops() {
         #expect(stopMessage(.alphaVantage, #"{"Note": "Thank you for using Alpha Vantage!"}"#) == "Thank you for using Alpha Vantage!")
-        let info = "We have detected your API key as test-key and our standard API rate limit is 25 requests per day."
-        #expect(stopMessage(.alphaVantage, #"{"Information": "\#(info)"}"#) == info)
+        let info = "We have detected your API key as test-key-123 and our standard API rate limit is 25 requests per day."
+        #expect(stopMessage(.alphaVantage, #"{"Information": "\#(info)"}"#)
+            == "We have detected your API key as ••• and our standard API rate limit is 25 requests per day.")
+    }
+
+    @Test func finnhubStopRedactsKey() {
+        #expect(stopMessage(.finnhub, #"{"error":"Invalid API key test-key-123"}"#, status: 401) == "Invalid API key •••")
     }
 
     // MARK: url

@@ -31,6 +31,8 @@ enum StockProvider: String, CaseIterable {
     }
 
     /// Requests per refresh run (Finnhub free: 60/min).
+    // ponytail: caps one run only, two runs inside a minute can pass 60/min and hit 429
+    // (the stop path recovers); add a per-minute call window if that shows up in practice.
     var perRun: Int {
         switch self {
         case .finnhub: 50
@@ -64,12 +66,16 @@ enum StockProvider: String, CaseIterable {
     }
 
     /// nil = skip this symbol; throws `StockError.stop` = stop the whole run (limit / bad key).
-    func parse(_ data: Data, status: Int, now: Date) throws -> StockQuotes.Quote? {
+    /// Stop messages have `key` redacted: AV echoes it ("We have detected your API key as ...").
+    func parse(_ data: Data, status: Int, now: Date, key: String) throws -> StockQuotes.Quote? {
+        func stop(_ message: String) -> StockError {
+            .stop(key.isEmpty ? message : message.replacingOccurrences(of: key, with: "•••"))
+        }
         switch self {
         case .finnhub:
             struct Response: Decodable { let c: Double?; let t: Double?; let error: String? }
             let response = try? JSONDecoder().decode(Response.self, from: data)
-            if status == 401 || status == 429 { throw StockError.stop(response?.error ?? "HTTP \(status)") }
+            if status == 401 || status == 429 { throw stop(response?.error ?? "HTTP \(status)") }
             // Other non-200s (403 = no access, e.g. non-US tickers on the free tier) skip the symbol.
             guard status == 200, let c = response?.c, let price = Decimal(string: String(c)), price > 0 else { return nil }
             let t = response?.t ?? 0
@@ -82,7 +88,7 @@ enum StockProvider: String, CaseIterable {
                 }
             }
             let response = try? JSONDecoder().decode(Response.self, from: data)
-            if let message = response?.note ?? response?.information { throw StockError.stop(message) }
+            if let message = response?.note ?? response?.information { throw stop(message) }
             // AV gives only a trading day, so the fetch time is the quote date.
             guard let text = response?.quote?["05. price"], let price = Decimal(string: text), price > 0 else { return nil }
             return StockQuotes.Quote(price: price, date: now)
@@ -177,8 +183,7 @@ enum Stocks {
     /// Networked entry point. Offline / limit errors land in `lastError`; the cache keeps serving.
     /// Callers run FX.refresh afterwards (it records the net-worth snapshot).
     static func refresh(context: ModelContext, now: Date = .now) async {
-        guard let key = Keychain.get(Keychain.stockAPIKey)?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !key.isEmpty, !running else { return }
+        guard let key = apiKey(), !running else { return }
         running = true
         defer { running = false }
 
@@ -200,17 +205,17 @@ enum Stocks {
                 break
             }
             requested = true
-            cache.attempts[symbol] = now
-            cache.calls.append(now)
+            if provider.perDay != nil { cache.calls.append(now) }
             do {
-                if let quote = try provider.parse(data, status: (response as? HTTPURLResponse)?.statusCode ?? 0, now: now) {
+                if let quote = try provider.parse(data, status: (response as? HTTPURLResponse)?.statusCode ?? 0, now: now, key: key) {
                     cache.quotes[symbol] = quote
                 }
             } catch StockError.stop(let message) {
                 cache.lastError = message
                 failed = true
-                break
+                break // no attempt recorded: the symbol stays due for the next run
             } catch {}
+            cache.attempts[symbol] = now
         }
         if requested, !failed {
             cache.fetchedAt = now
@@ -222,9 +227,15 @@ enum Stocks {
         try? context.save()
     }
 
+    /// Trimmed stored key, nil when missing or blank.
+    private static func apiKey() -> String? {
+        let key = Keychain.get(Keychain.stockAPIKey)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return key.isEmpty ? nil : key
+    }
+
     #if os(iOS)
     static func scheduleRefresh() {
-        guard !Storage.inMemory, Keychain.get(Keychain.stockAPIKey)?.isEmpty == false else { return }
+        guard !Storage.inMemory, apiKey() != nil else { return }
         let request = BGAppRefreshTaskRequest(identifier: taskID)
         request.earliestBeginDate = .now.addingTimeInterval(StockQuotes.interval)
         try? BGTaskScheduler.shared.submit(request)
