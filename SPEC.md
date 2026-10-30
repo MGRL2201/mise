@@ -631,3 +631,90 @@ To be filled in as capability spikes (Phase 1, Phase 9) complete.
   the raw text into manual entry); compute dates in code (`NSDataDetector` /
   Calendar) instead of trusting model dates; only accept a currency the text
   actually contains, else the user's default; normalise "nil" to nil.
+
+### TextEditor + AttributedString (Phase 5 spike, #51)
+
+- **Date / machine:** 2026-10-30, iPhone 17 Simulator (iOS 27.0 runtime),
+  macOS 26.6.2 Debug build, Xcode 27.1. Harness (DEBUG only, throwaway):
+  `mise/NoteEditorSpike.swift` (`NoteEditorSpike` view + `enum NoteSpike` pure
+  functions), `miseTests/NoteEditorSpikeTests.swift` (8 tests). Launch args:
+  `-miseSpike notes` (sample note, formatting bar), `-miseSpike probe`
+  (rendering probe), `-miseSpikeType YES` (scripted typing),
+  `-miseSpikeSource YES` (raw Markdown view).
+- **API:** `TextEditor(text: Binding<AttributedString>, selection:
+  Binding<AttributedTextSelection>)` works on iOS and macOS. Used:
+  `AttributedTextSelection` (`indices(in:)` → `.insertionPoint` /
+  `.ranges(RangeSet)`, `init(insertionPoint:typingAttributes:)`,
+  `init(range:)`, `typingAttributes(in:)`),
+  `AttributedString.transformAttributes(in: &selection)`,
+  `transform(updating: &selection)` (keeps the selection valid across prefix
+  inserts/removals — no manual index fixing),
+  `replaceSelection(_:withCharacters:)`. All compiled as documented; no
+  availability checks needed (deployment target 26.0).
+  `AttributedTextFormattingDefinition` / `AttributedTextValueConstraint` exist
+  (constraint = `constrain(_ container: inout Attributes)` per one attribute
+  key) but were not needed and not tried.
+- **What TextEditor draws (probe, visual):** `inlinePresentationIntent`
+  (`.stronglyEmphasized` bold, `.emphasized` italic, `.code` monospaced),
+  `font` (`.title.bold()` etc.), strikethrough, foreground color, plain glyphs
+  (•, ☐, ☑). Ignored: block `presentationIntent` (`.header`, lists render as
+  plain text). `AttributedString(markdown:)` with full syntax collapses block
+  structure into one line and leaves task markers as literal `[ ]` — don't
+  feed whole notes through it.
+- **Prototype representation:** bold/italic/code = `inlinePresentationIntent`
+  bits (1:1 with Markdown); heading = fixed font per level on the paragraph
+  (`.title/.title2/.title3 .bold()`, detected by `Font ==`, which works);
+  bullet = "• " text prefix; checkbox = "☐ "/"☑ " text prefix. A paragraph =
+  text between "\n".
+- **Verified visually (screenshots, iOS + Mac):** sample note parsed from
+  Markdown renders headings, bold/italic/code, bullets, checkboxes; scripted
+  typing (`replaceSelection` per character, through the same
+  `onChange(of: text)` path) turned `# ` into a title-font heading, `- ` into
+  bullets, `[ ] ` into ☐, continued the bullet on Return, ended the list on
+  Return at an empty "• " line, reset to body font after Return on a heading;
+  selection-based toggles made "Plain" bold, "paragraph" italic and flipped
+  ☐→☑; Source view shows the serialized Markdown. iOS and macOS looked the
+  same (Mac dark mode fine).
+- **Verified by unit tests only:** shortcut rules, cursor preserved when `- `
+  becomes `• `, bold toggle on/off over a range, list continuation/ending and
+  splitting a non-empty item, heading toggle not spilling past a selected
+  trailing newline, prefix inside a heading keeps the heading, Markdown round
+  trip `markdown(attributed(markdown: s)) == s` for headings, bold, italic,
+  bullets and tasks.
+- **Not verified (needs a human on device/Mac):** real keyboard input —
+  whether TextEditor honours typing attributes we set from `onChange` (e.g.
+  bold toggle at an insertion point, body font after a heading) when the user
+  types; mutating `text`/`selection` inside `onChange` while the editor is
+  first responder (cursor jumps, marked text/IME, autocorrect, dictation);
+  undo/redo of programmatic transforms (unknown whether the shortcut transform
+  is a separate undo step or breaks the undo stack); Writing Tools on the
+  attributed text; tapping a ☐ to toggle (TextEditor has no per-character tap
+  target, so the prototype toggles from the toolbar only); hardware-keyboard
+  shortcuts (⌘B/⌘I) on Mac/iPad.
+- **Gaps found:** (1) Return inside a heading ("Tit|le") resets the typing
+  font but the tail keeps the heading font — #54 must decide split semantics.
+  (2) `continueList` treats a pasted single "\n" or undo of a deleted newline
+  like a typed Return. (3) Serializer doesn't escape literal `*`/`_`/backticks
+  and wraps whitespace inside markers, so "**bold **x" won't parse back
+  (CommonMark flanking) — #53 must move whitespace outside markers and escape.
+  (4) "\r\n" is one grapheme; normalize line endings before splitting. (5) No
+  nested lists, numbered lists, links, quotes or code blocks in the prototype.
+  (6) Whole-document `applyShortcuts` scan per edit (fine for short notes;
+  scope to the edited paragraph if long notes lag). (7) Inserted prefixes copy
+  the paragraph's first-run attributes (a bold-start paragraph gets a bold
+  "• ").
+- **Recommendation:** use iOS 26 `TextEditor` + `AttributedString`; no
+  UIKit/AppKit text view wrapper needed for v1. #53: line-oriented serializer
+  — per paragraph map heading font → `#`…, "• " → `- `, "☐ "/"☑ " →
+  `- [ ] `/`- [x] `; inline runs by `inlinePresentationIntent`; parse by
+  splitting lines, inline-parsing each with `.inlineOnlyPreservingWhitespace`,
+  then applying the prefix shortcuts (the same function the editor uses). Add
+  escaping, flanking-safe markers, line-ending normalisation, numbered lists.
+  Store Markdown as the source of truth. #54: keep the pure-function shape
+  (`toggle`, `toggleHeading`, `toggleBullet`, `toggleCheckbox`,
+  `applyShortcuts`, `continueList`) driven from `onChange(of: text)` and a
+  formatting bar (keyboard toolbar on iOS); verify undo and real typing on
+  device first, and consider a custom attribute or
+  `AttributedTextFormattingDefinition` only if heading-by-font proves fragile.
+  #52 (model) only needs a Markdown `String` body; the editor converts on
+  load/save.
