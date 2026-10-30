@@ -198,8 +198,8 @@ enum NoteEditing {
             rest = rest.dropFirst(NoteMarkdown.quote.count)
         }
         if let glyph = NoteMarkdown.prefix(text, at: rest.startIndex) { return (quotes, glyph) }
-        let digits = rest.prefix { ("0"..."9").contains($0) }
-        return (quotes, !digits.isEmpty && rest.dropFirst(digits.count).starts(with: ". ") ? String(digits) + ". " : "")
+        let digits = rest.prefix { ("0"..."9").contains($0) }  // CommonMark: 1–9 digits, so `n + 1` can't overflow
+        return (quotes, (1...9).contains(digits.count) && rest.dropFirst(digits.count).starts(with: ". ") ? String(digits) + ". " : "")
     }
 
     /// Whether the paragraph at `start` sits inside a code fence, by the serializer's rules.

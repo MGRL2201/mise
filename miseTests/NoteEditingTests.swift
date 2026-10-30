@@ -303,6 +303,22 @@ struct NoteEditingTests {
         var sel = AttributedTextSelection(range: t.startIndex..<t.characters.index(t.startIndex, offsetBy: 2))
         NoteEditing.toggleBullet(in: &t, selection: &sel)
         #expect(NoteMarkdown.markdown(t) == "- a\nb")
+        // Off across several paragraphs.
+        #expect(apply([{ NoteEditing.toggleBullet(in: &$0, selection: &$1) }], to: "• a\nb") == "a\nb")
+        #expect(apply([{ NoteEditing.toggleQuote(in: &$0, selection: &$1) }], to: "▍ a\n▍ b") == "a\nb")
+        #expect(apply([{ NoteEditing.toggleNumbered(in: &$0, selection: &$1) }], to: "1. a\n2. b") == "a\nb")
+        // Numbering doesn't continue into a paragraph with different quotes.
+        #expect(apply([{ NoteEditing.toggleNumbered(in: &$0, selection: &$1) }], to: "▍ 1. a\nb", cursor: true) == "> 1. a\n1. b")
+    }
+
+    /// CommonMark caps list numbers at 9 digits; longer is text, and must not overflow `n + 1`.
+    @Test func longNumberIsText() {
+        let long = "9223372036854775807. x"
+        #expect(String(typeReturn(AttributedString(long)).0.characters) == long + "\n")
+        var t = AttributedString(long + "\nb")
+        var sel = atEnd(t)
+        NoteEditing.toggleNumbered(in: &t, selection: &sel)
+        #expect(String(t.characters) == long + "\n1. b")
     }
 
     @Test func listGlyphKeepsHeadingFontOnly() {
