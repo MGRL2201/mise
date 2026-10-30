@@ -33,6 +33,10 @@ struct NotesTests {
         #expect(Note(body: "plain text").title == "plain text")
         #expect(Note(body: "").title == "New Note")
         #expect(Note(body: " \n\t\n").title == "New Note")
+        #expect(Note(body: "* star").title == "star")
+        #expect(Note(body: "+ plus").title == "plus")
+        #expect(Note(body: "#hashtag").title == "#hashtag")
+        for marker in ["# ", "#", "- [ ]", "-", "*"] { #expect(Note(body: marker + "\nbody").title == "New Note") }
     }
 
     @Test func sortedPinnedFirstThenModifiedDescending() {
@@ -42,15 +46,6 @@ struct NotesTests {
         pinnedOld.modified = Date(timeIntervalSince1970: 0)
         pinnedOld.pinned = true
         #expect(Notes.sorted([old, new, pinnedOld]).map(\.body) == ["pinned", "new", "old"])
-    }
-
-    @Test func nestedFoldersLinkBothWays() throws {
-        let context = context()
-        let parent = folder("Work", in: context)
-        let child = folder("Projects", parent: parent, in: context)
-        try context.save()
-        #expect(child.parent === parent)
-        #expect(parent.children?.map(\.name) == ["Projects"])
     }
 
     @Test func deletingMiddleFolderMovesContentsToParent() throws {

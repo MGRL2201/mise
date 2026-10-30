@@ -23,7 +23,7 @@ final class Note {
     var id: UUID = UUID()
     /// Markdown; the source of truth.
     var body: String = ""
-    var created: Date = Date()
+    var createdAt: Date = Date()
     /// Bumped by body edits only (not moves or pins).
     var modified: Date = Date()
     var pinned = false
@@ -36,10 +36,11 @@ final class Note {
 
     /// First non-blank line, minus a leading heading / list / checkbox marker.
     var title: String {
-        guard var line = body.split(whereSeparator: \.isNewline)
+        guard var line = body.split(whereSeparator: \.isNewline).lazy
             .map({ $0.trimmingCharacters(in: .whitespaces) }).first(where: { !$0.isEmpty }) else { return "New Note" }
-        if let marker = line.firstMatch(of: /^(#{1,6} |- \[[ xX]\] |- )/) { line.removeSubrange(marker.range) }
-        return line.trimmingCharacters(in: .whitespaces)
+        if let marker = line.firstMatch(of: /^(#{1,6}|- \[[ xX]\]|[-*+])(\s+|$)/) { line.removeSubrange(marker.range) }
+        let title = line.trimmingCharacters(in: .whitespaces)
+        return title.isEmpty ? "New Note" : title
     }
 }
 

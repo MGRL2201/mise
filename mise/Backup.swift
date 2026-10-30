@@ -38,6 +38,26 @@ struct Backup: Codable {
     var netWorthSnapshots: [NetWorthSnapshotRecord]?
     /// Optional: files before #48 lack them.
     var holdings: [HoldingRecord]?
+    /// Optional: files before #52 lack them.
+    var noteFolders: [NoteFolderRecord]?
+    var notes: [NoteRecord]?
+
+    struct NoteFolderRecord: Codable {
+        var id: UUID
+        var name: String
+        var parentID: UUID?
+        var createdAt: Date
+    }
+
+    struct NoteRecord: Codable {
+        var id: UUID
+        var body: String
+        var createdAt: Date
+        var modified: Date
+        var pinned: Bool
+        var folderID: UUID?
+        var tagNames: [String]
+    }
 
     struct AccountRecord: Codable {
         var id: UUID
@@ -240,6 +260,13 @@ enum BackupService {
                                  quantity: $0.quantity, costBasis: $0.costBasis, currency: $0.currency,
                                  price: $0.price, priceDate: $0.priceDate, createdAt: $0.createdAt, coinID: $0.coinID)
         }
+        let noteFolders = try context.fetch(FetchDescriptor<NoteFolder>()).map {
+            Backup.NoteFolderRecord(id: $0.id, name: $0.name, parentID: $0.parent?.id, createdAt: $0.createdAt)
+        }
+        let notes = try context.fetch(FetchDescriptor<Note>()).map {
+            Backup.NoteRecord(id: $0.id, body: $0.body, createdAt: $0.createdAt, modified: $0.modified, pinned: $0.pinned,
+                              folderID: $0.folder?.id, tagNames: ($0.tags ?? []).map(\.name))
+        }
         var settings: [String: Any] = [:]
         for key in Backup.settingsKeys { settings[key] = defaults.object(forKey: key) }
         return try JSONEncoder().encode(Backup(
@@ -247,7 +274,8 @@ enum BackupService {
             settings: PropertyListSerialization.data(fromPropertyList: settings, format: .binary, options: 0),
             tags: tags, taskExtras: taskExtras, wakeAlarms: wakeAlarms, wakeLogs: wakeLogs,
             accounts: accounts, categories: categories, transactions: transactions, transfers: transfers,
-            bills: bills, goals: goals, netWorthSnapshots: netWorthSnapshots, holdings: holdings))
+            bills: bills, goals: goals, netWorthSnapshots: netWorthSnapshots, holdings: holdings,
+            noteFolders: noteFolders, notes: notes))
     }
 
     static func restore(_ data: Data, context: ModelContext, files: AttachmentFileStore, defaults: UserDefaults) throws {
@@ -273,6 +301,8 @@ enum BackupService {
             }
             // Version-1 backups carry no tags/extras: leave existing ones alone.
             if let tagNames = backup.tags, let records = backup.taskExtras {
+                // Files before #52 keep existing notes: remember their tags across the Tag wipe below.
+                let noteTags = backup.notes != nil ? [] : try context.fetch(FetchDescriptor<Note>()).map { ($0, ($0.tags ?? []).map(\.name)) }
                 try context.fetch(FetchDescriptor<TaskExtras>()).forEach(context.delete)
                 try context.fetch(FetchDescriptor<Tag>()).forEach(context.delete)
                 func key(_ name: String) -> String { name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
@@ -290,6 +320,31 @@ enum BackupService {
                     extras.estimateMinutes = record.estimateMinutes
                     context.insert(extras)
                     extras.tags = record.tagNames.compactMap { tagsByKey[key($0)] }
+                }
+                for (note, names) in noteTags { note.tags = try names.compactMap { try Tag.named($0, in: context) } }
+            }
+            // Files before #52 lack notes: leave existing ones alone. Runs after the Tag rebuild above.
+            if let noteRecords = backup.notes {
+                try context.fetch(FetchDescriptor<Note>()).forEach(context.delete)
+                try context.fetch(FetchDescriptor<NoteFolder>()).forEach(context.delete)
+                var folders: [UUID: NoteFolder] = [:]
+                for record in backup.noteFolders ?? [] {
+                    let folder = NoteFolder(name: record.name)
+                    folder.id = record.id
+                    folder.createdAt = record.createdAt
+                    context.insert(folder)
+                    folders[record.id] = folder
+                }
+                for record in backup.noteFolders ?? [] { folders[record.id]?.parent = record.parentID.flatMap { folders[$0] } }
+                for record in noteRecords {
+                    let note = Note(body: record.body)
+                    note.id = record.id
+                    note.createdAt = record.createdAt
+                    note.modified = record.modified
+                    note.pinned = record.pinned
+                    context.insert(note)
+                    note.folder = record.folderID.flatMap { folders[$0] }
+                    note.tags = try record.tagNames.compactMap { try Tag.named($0, in: context) }
                 }
             }
             // Files lacking wake alarms/logs leave existing ones alone.

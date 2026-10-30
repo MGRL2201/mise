@@ -336,4 +336,75 @@ extension BackupTests {
 
         #expect(StockProvider.current(target.defaults) == .alphaVantage)
     }
+
+    @Test func notesRoundTripAndReplaceStale() throws {
+        let source = try freshStore()
+        let top = NoteFolder(name: "Work")
+        let middle = NoteFolder(name: "Projects", parent: top)
+        let leaf = NoteFolder(name: "Mise", parent: middle)
+        [top, middle, leaf].forEach(source.context.insert)
+        let shared = try #require(try mise.Tag.named("Shared", in: source.context))
+        let extras = TaskExtras(reminderID: "r1", externalID: nil)
+        source.context.insert(extras)
+        extras.tags = [shared]
+        let note = Note(body: "# Plan\nship it")
+        note.createdAt = Date(timeIntervalSince1970: 1000)
+        note.modified = Date(timeIntervalSince1970: 2000)
+        let pinned = Note(body: "pinned")
+        pinned.pinned = true
+        source.context.insert(note)
+        source.context.insert(pinned)
+        note.folder = middle
+        note.tags = [shared, try #require(try mise.Tag.named("NoteOnly", in: source.context))]
+        try source.context.save()
+
+        let target = try freshStore()
+        let staleFolder = NoteFolder(name: "Stale")
+        let staleNote = Note(body: "stale")
+        target.context.insert(staleFolder)
+        target.context.insert(staleNote)
+        staleNote.folder = staleFolder
+        staleNote.tags = [try #require(try mise.Tag.named("shared", in: target.context))]
+        try target.context.save()
+        try restore(try export(source), into: target)
+
+        let folders = try target.context.fetch(FetchDescriptor<NoteFolder>())
+        #expect(Set(folders.map(\.name)) == ["Work", "Projects", "Mise"])
+        let topCopy = try #require(folders.first { $0.id == top.id })
+        let middleCopy = try #require(folders.first { $0.id == middle.id })
+        let leafCopy = try #require(folders.first { $0.id == leaf.id })
+        #expect(topCopy.parent == nil && middleCopy.parent === topCopy && leafCopy.parent === middleCopy)
+        #expect(topCopy.createdAt == top.createdAt && leafCopy.name == "Mise")
+        let notes = try target.context.fetch(FetchDescriptor<Note>())
+        #expect(notes.count == 2)
+        let copy = try #require(notes.first { $0.id == note.id })
+        #expect(copy.body == note.body && copy.createdAt == note.createdAt && copy.modified == note.modified && !copy.pinned)
+        #expect(copy.folder === middleCopy && Set(copy.tags?.map(\.name) ?? []) == ["Shared", "NoteOnly"])
+        let pinnedCopy = try #require(notes.first { $0.id == pinned.id })
+        #expect(pinnedCopy.pinned && pinnedCopy.folder == nil && pinnedCopy.body == "pinned")
+        let tags = try target.context.fetch(FetchDescriptor<mise.Tag>())
+        #expect(tags.map(\.name).sorted() == ["NoteOnly", "Shared"])
+        #expect(try target.context.fetch(FetchDescriptor<TaskExtras>()).first?.tags?.first === tags.first { $0.name == "Shared" })
+    }
+
+    @Test func backupWithoutNotesKeepsNoteTags() throws {
+        let target = try freshStore()
+        let folder = NoteFolder(name: "Kept")
+        let note = Note(body: "kept")
+        target.context.insert(folder)
+        target.context.insert(note)
+        note.folder = folder
+        note.tags = [try #require(try mise.Tag.named("Home", in: target.context)),
+                     try #require(try mise.Tag.named("Ideas", in: target.context))]
+        try target.context.save()
+        let settings = try PropertyListSerialization.data(fromPropertyList: [String: Any](), format: .binary, options: 0)
+        let json = #"{"version":2,"createdAt":0,"attachments":[],"settings":"\#(settings.base64EncodedString())","tags":["home"],"taskExtras":[{"reminderID":"r1","subtasks":[],"tagNames":["home"]}]}"#
+        try restore(Data(json.utf8), into: target)
+
+        let notes = try target.context.fetch(FetchDescriptor<Note>())
+        #expect(notes.map(\.id) == [note.id] && notes.first?.folder?.name == "Kept")
+        #expect(Set(notes.first?.tags?.map(\.name) ?? []) == ["home", "Ideas"])
+        #expect(try target.context.fetch(FetchDescriptor<mise.Tag>()).map(\.name).sorted() == ["Ideas", "home"])
+        #expect(try target.context.fetch(FetchDescriptor<TaskExtras>()).first?.tags?.map(\.name) == ["home"])
+    }
 }
